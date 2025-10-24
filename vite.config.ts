@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import electron from "vite-plugin-electron";
+import path from "path";
 
 // https://vite.dev/config/
 export default defineConfig(() => {
@@ -16,6 +17,11 @@ export default defineConfig(() => {
           // 主进程入口文件
           entry: "src/electron/main.ts",
           vite: {
+            resolve: {
+              alias: {
+                "@": path.resolve(__dirname, "src"),
+              },
+            },
             build: {
               rollupOptions: {
                 external: ["sharp"],
@@ -26,6 +32,13 @@ export default defineConfig(() => {
         {
           // 预加载脚本配置
           entry: "src/electron/preload.ts",
+          vite: {
+            resolve: {
+              alias: {
+                "@": path.resolve(__dirname, "src"),
+              },
+            },
+          },
           onstart(options) {
             // 预加载脚本热重启时会触发主进程重启
             options.reload();

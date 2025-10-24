@@ -1,16 +1,9 @@
-import { Button } from "antd";
-import { useEffect } from "react";
+import Directory from "@/components/Directory";
 
 const App: React.FC = () => {
-  useEffect(() => {
-    if (window.electronAPI) {
-      console.log(window.electronAPI.sayHello());
-    }
-  }, []);
-
   return (
     <div>
-      <Button type="primary">Primary Button</Button>
+      <Directory></Directory>
     </div>
   );
 };

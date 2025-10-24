@@ -1,8 +1,6 @@
 import { contextBridge } from "electron";
+import { getDirectoryContents } from "./module/directory";
 
 contextBridge.exposeInMainWorld("electronAPI", {
-  sayHello: (name?: string) => {
-    const message = name ? `Hello, ${name}!` : "Hello, Electron!";
-    return message;
-  },
+  getDirectoryContents, // 获取目录内容
 });
