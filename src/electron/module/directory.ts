@@ -1,7 +1,7 @@
 import { promises as fs } from "fs";
 import * as path from "path";
 import * as os from "os";
-import { FileItemTypeEnum, type FileItem } from "@/types";
+import { FileItemTypeEnum, type FileItem, type BreadcrumbList } from "@/types";
 
 /**
  * 获取目录内容（文件夹和图片文件）
@@ -165,4 +165,83 @@ function getMimeType(ext: string): string {
   };
 
   return mimeTypes[ext.toLowerCase()] || "image/jpeg";
+}
+
+/**
+ * 获取面包屑路径列表
+ * @param dirPath 目录路径，如果不传则使用系统默认路径
+ * @returns BreadcrumbList 面包屑路径数组，包含title和path，可直接用于getDirectoryContents方法
+ */
+export function getBreadcrumbList(dirPath?: string): BreadcrumbList {
+  let targetPath = dirPath;
+
+  // 如果没有传入路径，根据操作系统设置默认路径（与getDirectoryContents保持一致）
+  if (!targetPath) {
+    const platform = os.platform();
+
+    if (platform === "darwin") {
+      // Mac系统：默认读取桌面目录
+      targetPath = path.join(os.homedir(), "Desktop");
+    } else if (platform === "win32") {
+      // Windows系统：返回空数组，因为显示的是驱动器列表
+      return [];
+    } else {
+      // 其他类Unix系统：使用主目录
+      targetPath = os.homedir();
+    }
+  }
+
+  const breadcrumbList: BreadcrumbList = [];
+  const platform = os.platform();
+
+  if (platform === "win32") {
+    // Windows 路径处理
+    const normalized = path.resolve(targetPath);
+    const parts = normalized.split(path.sep);
+
+    // 第一个部分是驱动器（如 "C:"）
+    let currentPath = parts[0] + path.sep; // "C:\"
+    breadcrumbList.push({
+      title: parts[0], // "C:"
+      path: currentPath,
+    });
+
+    // 处理其余部分
+    for (let i = 1; i < parts.length; i++) {
+      if (parts[i]) {
+        // 跳过空字符串
+        currentPath = path.join(currentPath, parts[i]);
+        breadcrumbList.push({
+          title: parts[i], // 只显示当前目录名
+          path: currentPath, // 完整路径
+        });
+      }
+    }
+  } else {
+    // Unix-like 系统（Mac、Linux等）路径处理
+    const normalized = path.resolve(targetPath);
+    const parts = normalized.split(path.sep);
+
+    // 第一个部分是根目录 "/"
+    breadcrumbList.push({
+      title: "/", // 根目录显示为 "/"
+      path: "/",
+    });
+
+    // 处理其余部分
+    let currentPath = "";
+    for (let i = 1; i < parts.length; i++) {
+      if (parts[i]) {
+        // 跳过空字符串
+        currentPath = path.join(currentPath, parts[i]);
+        const fullPath = "/" + currentPath;
+        breadcrumbList.push({
+          title: parts[i], // 只显示当前目录名
+          path: fullPath, // 完整路径
+        });
+      }
+    }
+  }
+
+  return breadcrumbList;
 }

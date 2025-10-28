@@ -28,10 +28,19 @@ export type FileItem = {
   imageBase64?: string;
 };
 
+/**
+ * 面包屑列表
+ */
+export type BreadcrumbList = {
+  title: string;
+  path: string;
+}[];
+
 declare global {
   interface Window {
     electronAPI?: {
       getDirectoryContents: (dirPath?: string) => Promise<FileItem[]>; // 获取目录内容
+      getBreadcrumbList: (dirPath?: string) => BreadcrumbList; // 获取面包屑路径列表
     };
   }
 }
