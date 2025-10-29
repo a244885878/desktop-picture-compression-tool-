@@ -8,7 +8,7 @@
     "dev": "vite",
     "dev:electron": "cross-env ELECTRON=true vite",
     "build": "tsc -b && vite build",
-    "build:electron": "esbuild src/electron/main.ts --bundle --platform=node --format=esm --outfile=dist-electron/main.js --external:electron && esbuild src/electron/preload.ts --bundle --platform=node --format=esm --outfile=dist-electron/preload.js --external:electron && cross-env ELECTRON=true tsc -b && vite build && electron-builder",
+    "build:electron": "esbuild src/electron/main.ts --bundle --platform=node --format=esm --outfile=dist-electron/main.js --external:electron --alias:@=./src --resolve-extensions=.ts,.js && esbuild src/electron/preload.ts --bundle --platform=node --format=esm --outfile=dist-electron/preload.js --external:electron --alias:@=./src --resolve-extensions=.ts,.js && cross-env ELECTRON=true tsc -b && vite build && electron-builder",
     "lint": "eslint .",
     "preview": "vite preview"
   },
