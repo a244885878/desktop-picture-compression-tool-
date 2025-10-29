@@ -2,12 +2,45 @@ import { useEffect } from "react";
 import styles from "./index.module.scss";
 import { useImmer } from "use-immer";
 import { FileItemTypeEnum, type FileItem, type BreadcrumbList } from "@/types";
-import { Empty, Breadcrumb, Image } from "antd";
+import { Empty, Breadcrumb, Image, Dropdown } from "antd";
+import type { MenuProps } from "antd";
+import { DropdownMenuEnum } from "@/types";
 
 const Directory: React.FC = () => {
   const [list, setList] = useImmer<FileItem[]>([]);
   const [isEmpty, setIsEmpty] = useImmer(false);
   const [breadcrumb, setBreadcrumb] = useImmer<BreadcrumbList>([]);
+  // 下拉菜单
+  const dropdownMenu: MenuProps["items"] = [
+    {
+      key: DropdownMenuEnum.DELETE,
+      label: <span>删除</span>,
+    },
+    {
+      key: DropdownMenuEnum.RENAME,
+      label: <span>重命名</span>,
+    },
+    {
+      key: DropdownMenuEnum.COMPRESS,
+      label: <span>压缩</span>,
+    },
+    {
+      key: DropdownMenuEnum.DETAIL,
+      label: <span>详情</span>,
+    },
+    {
+      key: DropdownMenuEnum.FORMAT_CONVERT,
+      label: <span>格式转换</span>,
+    },
+    {
+      key: DropdownMenuEnum.CROP,
+      label: <span>裁剪</span>,
+    },
+    {
+      key: DropdownMenuEnum.WATERMARK,
+      label: <span>加水印</span>,
+    },
+  ];
 
   // 获取目录
   const getDirectory = (path?: string) => {
@@ -46,10 +79,16 @@ const Directory: React.FC = () => {
     // 图片
     if (item.type === FileItemTypeEnum.IMAGE) {
       return (
-        <div className={styles.fileBox} key={index}>
-          <Image src={item.imageBase64} className={styles.img} />
-          <div className={styles.fileName}>{item.name}</div>
-        </div>
+        <Dropdown
+          menu={{ items: dropdownMenu }}
+          trigger={["contextMenu"]}
+          key={index}
+        >
+          <div className={styles.fileBox}>
+            <Image src={item.imageBase64} className={styles.img} />
+            <div className={styles.fileName}>{item.name}</div>
+          </div>
+        </Dropdown>
       );
     }
   };

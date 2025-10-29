@@ -36,6 +36,40 @@ export type BreadcrumbList = {
   path: string;
 }[];
 
+/**
+ * 下拉菜单枚举
+ */
+export enum DropdownMenuEnum {
+  /**
+   * 删除
+   */
+  DELETE = "delete",
+  /**
+   * 重命名
+   */
+  RENAME = "rename",
+  /**
+   * 压缩
+   */
+  COMPRESS = "compress",
+  /**
+   * 详情
+   */
+  DETAIL = "detail",
+  /**
+   * 格式转换
+   */
+  FORMAT_CONVERT = "format_convert",
+  /**
+   * 裁剪
+   */
+  CROP = "crop",
+  /**
+   * 加水印
+   */
+  WATERMARK = "watermark",
+}
+
 declare global {
   interface Window {
     electronAPI?: {
