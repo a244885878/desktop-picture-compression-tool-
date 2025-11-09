@@ -1,65 +1,132 @@
-import { useEffect } from "react";
+import { useEffect, useCallback } from "react";
 import styles from "./index.module.scss";
 import { useImmer } from "use-immer";
 import { FileItemTypeEnum, type FileItem, type BreadcrumbList } from "@/types";
-import { Empty, Breadcrumb, Image, Dropdown } from "antd";
+import {
+  Empty,
+  Breadcrumb,
+  Image,
+  Dropdown,
+  Checkbox,
+  Button,
+  Modal,
+  App,
+} from "antd";
 import type { MenuProps } from "antd";
 import { DropdownMenuEnum } from "@/types";
 
 const Directory: React.FC = () => {
-  const [list, setList] = useImmer<FileItem[]>([]);
-  const [isEmpty, setIsEmpty] = useImmer(false);
-  const [breadcrumb, setBreadcrumb] = useImmer<BreadcrumbList>([]);
+  const [list, setList] = useImmer<FileItem[]>([]); // 列表数据
+  const [isEmpty, setIsEmpty] = useImmer(false); // 是否为空
+  const [breadcrumb, setBreadcrumb] = useImmer<BreadcrumbList>([]); // 面包屑
+  const [batchOperation, setBatchOperation] = useImmer(false); // 是否开启批量操作
+  const [selectedFiles, setSelectedFiles] = useImmer<FileItem[]>([]); // 选中的文件
+  const [currentPath, setCurrentPath] = useImmer<string | undefined>(undefined); // 当前目录路径
+  const { message } = App.useApp();
+
   // 下拉菜单
-  const dropdownMenu: MenuProps["items"] = [
-    {
-      key: DropdownMenuEnum.DELETE,
-      label: <span>删除</span>,
-    },
-    {
-      key: DropdownMenuEnum.RENAME,
-      label: <span>重命名</span>,
-    },
-    {
-      key: DropdownMenuEnum.COMPRESS,
-      label: <span>压缩</span>,
-    },
-    {
-      key: DropdownMenuEnum.DETAIL,
-      label: <span>详情</span>,
-    },
-    {
-      key: DropdownMenuEnum.FORMAT_CONVERT,
-      label: <span>格式转换</span>,
-    },
-    {
-      key: DropdownMenuEnum.CROP,
-      label: <span>裁剪</span>,
-    },
-    {
-      key: DropdownMenuEnum.WATERMARK,
-      label: <span>加水印</span>,
-    },
-  ];
+  const getDropdownMenu = (item: FileItem) => {
+    const menu: MenuProps["items"] = [
+      {
+        key: DropdownMenuEnum.DELETE,
+        label: <span>删除</span>,
+        onClick: () => {
+          deleteFile([item.path]);
+        },
+      },
+      {
+        key: DropdownMenuEnum.RENAME,
+        label: <span>重命名</span>,
+      },
+      {
+        key: DropdownMenuEnum.COMPRESS,
+        label: <span>压缩</span>,
+      },
+      {
+        key: DropdownMenuEnum.DETAIL,
+        label: <span>详情</span>,
+      },
+      {
+        key: DropdownMenuEnum.FORMAT_CONVERT,
+        label: <span>格式转换</span>,
+      },
+      {
+        key: DropdownMenuEnum.CROP,
+        label: <span>裁剪</span>,
+      },
+      {
+        key: DropdownMenuEnum.WATERMARK,
+        label: <span>加水印</span>,
+      },
+    ];
+    return menu;
+  };
 
   // 获取目录
-  const getDirectory = (path?: string) => {
+  const getDirectory = useCallback(
+    (path?: string) => {
+      if (window.electronAPI) {
+        setCurrentPath(path); // 保存当前目录路径
+        window.electronAPI.getDirectoryContents(path).then((res) => {
+          setList(res);
+          // 目录是否为空
+          if (!res.length) setIsEmpty(true);
+          else setIsEmpty(false);
+        });
+        // 获取面包屑
+        const breadcrumbList = window.electronAPI.getBreadcrumbList(path);
+        setBreadcrumb(breadcrumbList);
+      }
+    },
+    [setCurrentPath, setList, setIsEmpty, setBreadcrumb]
+  );
+
+  // 记录选中的文件
+  const handleCheckboxChange = (item: FileItem, checked: boolean) => {
+    if (checked) {
+      setSelectedFiles([...selectedFiles, item]);
+    } else {
+      setSelectedFiles(selectedFiles.filter((file) => file.path !== item.path));
+    }
+  };
+
+  // 点击批量操作
+  const handleBatchOperationChange = (checked: boolean) => {
+    setBatchOperation(!batchOperation);
+    if (!checked) {
+      setSelectedFiles([]);
+    }
+  };
+
+  // 删除文件
+  const deleteFile = (files: string[]) => {
     if (window.electronAPI) {
-      window.electronAPI.getDirectoryContents(path).then((res) => {
-        setList(res);
-        // 目录是否为空
-        if (!res.length) setIsEmpty(true);
-        else setIsEmpty(false);
+      Modal.confirm({
+        title: "确认删除吗？",
+        content: "删除后将无法恢复，请谨慎操作。",
+        okText: "确认",
+        cancelText: "取消",
+        async onOk() {
+          const success = await window.electronAPI?.deleteFile(files);
+          if (success) {
+            message.success("删除成功");
+            // 刷新当前目录
+            getDirectory(currentPath);
+            // 从选中列表中移除已删除的文件
+            setSelectedFiles((draft) => {
+              return draft.filter((file) => !files.includes(file.path));
+            });
+          } else {
+            message.error("删除失败");
+          }
+        },
       });
-      // 获取面包屑
-      const breadcrumbList = window.electronAPI.getBreadcrumbList(path);
-      setBreadcrumb(breadcrumbList);
     }
   };
 
   useEffect(() => {
     getDirectory();
-  }, []);
+  }, [getDirectory]);
 
   // 动态显示文件类型
   const showFileType = (item: FileItem, index: number) => {
@@ -80,12 +147,27 @@ const Directory: React.FC = () => {
     if (item.type === FileItemTypeEnum.IMAGE) {
       return (
         <Dropdown
-          menu={{ items: dropdownMenu }}
+          menu={{ items: getDropdownMenu(item) }}
           trigger={["contextMenu"]}
           key={index}
         >
           <div className={styles.fileBox}>
-            <Image src={item.imageBase64} className={styles.img} />
+            <div className={styles.imgBox}>
+              <Image src={item.imageBase64} className={styles.img} />
+              {batchOperation && (
+                <Checkbox
+                  onChange={(e) => handleCheckboxChange(item, e.target.checked)}
+                  className={styles.checkbox}
+                  style={{
+                    transform: "scale(2)",
+                    transformOrigin: "0 0",
+                  }}
+                  checked={selectedFiles.some(
+                    (file) => file.path === item.path
+                  )}
+                ></Checkbox>
+              )}
+            </div>
             <div className={styles.fileName}>{item.name}</div>
           </div>
         </Dropdown>
@@ -95,16 +177,24 @@ const Directory: React.FC = () => {
 
   return (
     <div className={styles.directoryContainer}>
-      <Breadcrumb
-        separator=">"
-        items={breadcrumb.map((item) => ({
-          title: item.title,
-          path: item.path,
-          onClick: () => {
-            getDirectory(item.path);
-          },
-        }))}
-      />
+      <div className={styles.headerBox}>
+        <Breadcrumb
+          separator=">"
+          items={breadcrumb.map((item) => ({
+            title: item.title,
+            path: item.path,
+            onClick: () => {
+              getDirectory(item.path);
+            },
+          }))}
+        />
+        <Checkbox
+          checked={batchOperation}
+          onChange={(e) => handleBatchOperationChange(e.target.checked)}
+        >
+          批量操作
+        </Checkbox>
+      </div>
       <div className={styles.directoryItemList}>
         {isEmpty ? (
           <div className={styles.emptyContainer}>
@@ -114,6 +204,33 @@ const Directory: React.FC = () => {
           list.map((item, index) => showFileType(item, index))
         )}
       </div>
+      {batchOperation && (
+        <div className={styles.batchOperationBox}>
+          <span>当前已选择</span>
+          <span style={{ color: "#40a9ff" }}>{selectedFiles.length}</span>
+          <span>个文件</span>
+          {selectedFiles.length > 0 && (
+            <div className={styles.batchOperationButtonBox}>
+              <Button
+                color="primary"
+                variant="text"
+                onClick={() => deleteFile(selectedFiles.map((v) => v.path))}
+              >
+                批量删除
+              </Button>
+              <Button color="primary" variant="text">
+                批量压缩
+              </Button>
+              <Button color="primary" variant="text">
+                批量格式转换
+              </Button>
+              <Button color="primary" variant="text">
+                批量加水印
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

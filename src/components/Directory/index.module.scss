@@ -5,6 +5,12 @@
   display: flex;
   flex-direction: column;
 
+  .headerBox {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
   .directoryItemList {
     display: flex;
     flex-wrap: wrap;
@@ -13,7 +19,7 @@
     flex: 1;
     overflow: auto;
     align-content: flex-start;
-    margin-top: 10px;
+    margin: 10px 0;
 
     .emptyContainer {
       width: 100%;
@@ -44,11 +50,20 @@
         cursor: pointer;
       }
 
-      .img {
-        width: $size;
-        height: $size;
-        cursor: pointer;
-        object-fit: cover;
+      .imgBox {
+        position: relative;
+        .img {
+          width: $size;
+          height: $size;
+          cursor: pointer;
+          object-fit: cover;
+        }
+
+        .checkbox {
+          position: absolute;
+          right: 20px;
+          bottom: 20px;
+        }
       }
 
       .fileName {
@@ -60,6 +75,17 @@
         text-overflow: ellipsis;
         word-break: break-all;
       }
+    }
+  }
+
+  .batchOperationBox {
+    font-size: 16px;
+    color: #333;
+    display: flex;
+    align-items: center;
+
+    .batchOperationButtonBox {
+      margin-left: auto;
     }
   }
 }

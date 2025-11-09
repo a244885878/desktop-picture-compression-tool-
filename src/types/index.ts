@@ -75,6 +75,7 @@ declare global {
     electronAPI?: {
       getDirectoryContents: (dirPath?: string) => Promise<FileItem[]>; // 获取目录内容
       getBreadcrumbList: (dirPath?: string) => BreadcrumbList; // 获取面包屑路径列表
+      deleteFile: (filePaths: string[]) => Promise<boolean>; // 批量删除文件或文件夹
     };
   }
 }

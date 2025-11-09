@@ -1,16 +1,16 @@
 import Directory from "@/components/Directory";
-import { ConfigProvider } from "antd";
+import { App, ConfigProvider } from "antd";
 import zhCN from "antd/locale/zh_CN";
 import "dayjs/locale/zh-cn";
 
-const App: React.FC = () => {
+const MyApp: React.FC = () => {
   return (
-    <div>
-      <ConfigProvider locale={zhCN}>
+    <ConfigProvider locale={zhCN}>
+      <App>
         <Directory></Directory>
-      </ConfigProvider>
-    </div>
+      </App>
+    </ConfigProvider>
   );
 };
 
-export default App;
+export default MyApp;
