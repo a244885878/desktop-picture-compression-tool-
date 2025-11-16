@@ -11,10 +11,12 @@ import {
   Button,
   Modal,
   App,
+  Skeleton,
 } from "antd";
 import type { MenuProps } from "antd";
 import { DropdownMenuEnum } from "@/types";
 import RenameModal from "@/components/RenameModal";
+import CompressedFilesModal from "../CompressedFilesModal";
 
 const Directory: React.FC = () => {
   const [list, setList] = useImmer<FileItem[]>([]); // 列表数据
@@ -25,6 +27,9 @@ const Directory: React.FC = () => {
   const [currentPath, setCurrentPath] = useImmer<string | undefined>(undefined); // 当前目录路径
   const [renameModalOpen, setRenameModalOpen] = useImmer(false); // 重命名弹窗是否打开
   const currentFile = useRef<FileItem | undefined>(undefined); // 当前选中的文件
+  const [loading, setLoading] = useImmer(false); // 是否加载中
+  const [compressedFilesModalOpen, setCompressedFilesModalOpen] =
+    useImmer(false); // 压缩文件弹窗是否打开
 
   const { message } = App.useApp();
 
@@ -49,6 +54,10 @@ const Directory: React.FC = () => {
       {
         key: DropdownMenuEnum.COMPRESS,
         label: <span>压缩</span>,
+        onClick: () => {
+          setSelectedFiles([item]);
+          setCompressedFilesModalOpen(true);
+        },
       },
       {
         key: DropdownMenuEnum.DETAIL,
@@ -72,21 +81,23 @@ const Directory: React.FC = () => {
 
   // 获取目录
   const getDirectory = useCallback(
-    (path?: string) => {
+    async (path?: string) => {
       if (window.electronAPI) {
-        setCurrentPath(path); // 保存当前目录路径
-        window.electronAPI.getDirectoryContents(path).then((res) => {
+        setLoading(true);
+        setCurrentPath(path);
+        try {
+          const res = await window.electronAPI.getDirectoryContents(path);
           setList(res);
-          // 目录是否为空
           if (!res.length) setIsEmpty(true);
           else setIsEmpty(false);
-        });
-        // 获取面包屑
-        const breadcrumbList = window.electronAPI.getBreadcrumbList(path);
-        setBreadcrumb(breadcrumbList);
+          const breadcrumbList = window.electronAPI.getBreadcrumbList(path);
+          setBreadcrumb(breadcrumbList);
+        } finally {
+          setLoading(false);
+        }
       }
     },
-    [setCurrentPath, setList, setIsEmpty, setBreadcrumb]
+    [setCurrentPath, setList, setIsEmpty, setBreadcrumb, setLoading]
   );
 
   // 记录选中的文件
@@ -99,11 +110,9 @@ const Directory: React.FC = () => {
   };
 
   // 点击批量操作
-  const handleBatchOperationChange = (checked: boolean) => {
+  const handleBatchOperationChange = () => {
+    setSelectedFiles([]);
     setBatchOperation(!batchOperation);
-    if (!checked) {
-      setSelectedFiles([]);
-    }
   };
 
   // 删除文件
@@ -115,25 +124,29 @@ const Directory: React.FC = () => {
         okText: "确认",
         cancelText: "取消",
         async onOk() {
-          const success = await window.electronAPI?.deleteFile(files);
-          if (success) {
-            message.success("删除成功");
-            // 刷新当前目录
-            getDirectory(currentPath);
-            // 从选中列表中移除已删除的文件
-            setSelectedFiles((draft) => {
-              return draft.filter((file) => !files.includes(file.path));
-            });
-          } else {
-            message.error("删除失败");
+          setLoading(true);
+          try {
+            const success = await window.electronAPI?.deleteFile(files);
+            if (success) {
+              message.success("删除成功");
+              await getDirectory(currentPath);
+              setSelectedFiles((draft) => {
+                return draft.filter((file) => !files.includes(file.path));
+              });
+            } else {
+              message.error("删除失败");
+            }
+          } finally {
+            setLoading(false);
           }
         },
       });
     }
   };
 
-  // 重命名成功-刷新列表
-  const renameFile = () => {
+  // 刷新列表
+  const refreshList = () => {
+    setBatchOperation(false);
     getDirectory(currentPath);
   };
 
@@ -204,14 +217,27 @@ const Directory: React.FC = () => {
         />
         <Checkbox
           checked={batchOperation}
-          onChange={(e) => handleBatchOperationChange(e.target.checked)}
+          onChange={handleBatchOperationChange}
         >
           批量操作
         </Checkbox>
       </div>
       {/* 目录列表 */}
       <div className={styles.directoryItemList}>
-        {isEmpty ? (
+        {loading ? (
+          Array.from({ length: 12 }).map((_, index) => (
+            <div className={styles.fileBox} key={index}>
+              <div className={styles.imgBox}>
+                <Skeleton.Image active style={{ width: 100, height: 100 }} />
+              </div>
+              <Skeleton
+                active
+                title={false}
+                paragraph={{ rows: 1, width: 100 }}
+              />
+            </div>
+          ))
+        ) : isEmpty ? (
           <div className={styles.emptyContainer}>
             <Empty />
           </div>
@@ -234,7 +260,11 @@ const Directory: React.FC = () => {
               >
                 批量删除
               </Button>
-              <Button color="primary" variant="text">
+              <Button
+                color="primary"
+                variant="text"
+                onClick={() => setCompressedFilesModalOpen(true)}
+              >
                 批量压缩
               </Button>
               <Button color="primary" variant="text">
@@ -250,9 +280,17 @@ const Directory: React.FC = () => {
       {/* 重命名弹窗 */}
       <RenameModal
         open={renameModalOpen}
-        onOk={renameFile}
+        onOk={refreshList}
         file={currentFile.current!}
         onCancel={() => setRenameModalOpen(false)}
+      />
+      {/* 压缩文件弹窗 */}
+      <CompressedFilesModal
+        open={compressedFilesModalOpen}
+        currentDirectory={currentPath!}
+        onOk={refreshList}
+        onCancel={() => setCompressedFilesModalOpen(false)}
+        selectedFiles={selectedFiles}
       />
     </div>
   );

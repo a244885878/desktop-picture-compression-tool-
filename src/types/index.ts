@@ -75,8 +75,13 @@ declare global {
     electronAPI?: {
       getDirectoryContents: (dirPath?: string) => Promise<FileItem[]>; // 获取目录内容
       getBreadcrumbList: (dirPath?: string) => BreadcrumbList; // 获取面包屑路径列表
-      deleteFile: (filePaths: string[]) => Promise<boolean>; // 批量删除文件或文件夹
+      deleteFile: (filePaths: string[]) => Promise<boolean>; // 批量删除文件
       renameFile: (filePath: string, newName: string) => Promise<boolean>; // 重命名文件
+      compressFiles: (
+        filePaths: string[],
+        outputDir: string,
+        quality?: number
+      ) => Promise<{ success: boolean; results: { inputPath: string; outputPath: string; success: boolean; error?: string }[] }>; // 批量压缩图片
     };
   }
 }

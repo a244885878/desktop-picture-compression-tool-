@@ -21,6 +21,7 @@ const RenameModal: React.FC<RenameModalProps> = ({
   ...rest
 }) => {
   const [form] = Form.useForm();
+  const { message } = App.useApp();
 
   const validateName = (_: unknown, value: string) => {
     void _;
@@ -35,7 +36,6 @@ const RenameModal: React.FC<RenameModalProps> = ({
       return Promise.reject("图片文件名不能包含点号，后缀自动保留");
     return Promise.resolve();
   };
-  const { message } = App.useApp();
 
   const onFinish = async (values: FormType) => {
     if (window.electronAPI) {
@@ -70,7 +70,7 @@ const RenameModal: React.FC<RenameModalProps> = ({
       onOk={() => form.submit()}
       onCancel={() => onCancel?.()}
     >
-      <Form name="form" form={form} onFinish={onFinish}>
+      <Form form={form} onFinish={onFinish}>
         <Form.Item<FormType>
           label="文件名"
           name="name"

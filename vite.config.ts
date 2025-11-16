@@ -38,6 +38,11 @@ export default defineConfig(() => {
                 "@": path.resolve(__dirname, "src"),
               },
             },
+            build: {
+              rollupOptions: {
+                external: ["sharp"],
+              },
+            },
           },
           onstart(options) {
             // 预加载脚本热重启时会触发主进程重启
@@ -56,6 +61,9 @@ export default defineConfig(() => {
       alias: {
         "@": "/src",
       },
+    },
+    optimizeDeps: {
+      exclude: ["sharp"],
     },
     server: {
       host: "0.0.0.0",

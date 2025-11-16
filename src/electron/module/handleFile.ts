@@ -1,4 +1,5 @@
 import { promises as fs } from "fs";
+import sharp from "sharp"; // 使用 sharp 进行跨格式图片压缩与编码
 import * as path from "path";
 
 /**
@@ -108,4 +109,142 @@ export async function renameFile(
   }
 
   return true;
+}
+
+/**
+ * 压缩结果类型
+ * - inputPath：输入文件的绝对路径
+ * - outputPath：输出文件的绝对路径（失败时为空字符串）
+ * - success：是否压缩成功
+ * - error：失败原因（仅在失败时存在）
+ */
+type CompressResult = { inputPath: string; outputPath: string; success: boolean; error?: string };
+
+/**
+ * 判断是否为支持的图片格式
+ * 支持：jpg/jpeg、png、webp、tif/tiff、avif
+ */
+function isSupportedFormat(ext: string) {
+  const e = ext.toLowerCase();
+  return [".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff", ".avif"].includes(e);
+}
+
+/**
+ * 确保目录存在（不存在则递归创建）
+ */
+async function ensureDir(dir: string) {
+  try {
+    await fs.mkdir(dir, { recursive: true });
+  } catch {
+    return;
+  }
+}
+
+/**
+ * 根据命名规则生成输出文件路径并避免重名
+ * 规则：
+ * - 原文件名不包含“_压缩”：name.ext → name_压缩.ext
+ * - 原文件名已包含“_压缩”：name_压缩.ext → name_压缩_1.ext；name_压缩_3.ext → name_压缩_4.ext
+ * - 若目标已存在，则继续递增编号，直到找到可用文件名
+ */
+async function nextOutputPath(outputDir: string, inputPath: string) {
+  const ext = path.extname(inputPath);
+  const base = path.basename(inputPath, ext);
+  const m = base.match(/^(.*)_压缩(?:_(\d+))?$/);
+  const root = m ? m[1] : base;
+  let n = m && m[2] ? parseInt(m[2], 10) + 1 : m ? 1 : 0;
+
+  let candidateBase = n === 0 ? `${root}_压缩` : `${root}_压缩_${n}`;
+  let candidate = path.join(outputDir, `${candidateBase}${ext}`);
+
+  while (true) {
+    try {
+      await fs.access(candidate);
+      n = n === 0 ? 1 : n + 1;
+      candidateBase = `${root}_压缩_${n}`;
+      candidate = path.join(outputDir, `${candidateBase}${ext}`);
+    } catch {
+      // 文件不存在，当前候选名可用
+      return candidate;
+    }
+  }
+}
+
+/**
+ * 批量压缩图片文件
+ * @param filePaths 需要压缩的图片绝对路径数组（仅文件）
+ * @param outputDir 压缩后输出目录（不存在将自动创建）
+ * @param quality 可选压缩质量（1-100，默认 80）
+ * @returns { success, results }：总体成功标记与逐项结果
+ *
+ * 行为说明：
+ * - 非文件或不支持的格式会返回失败项，但不影响其他文件的处理
+ * - 输出文件扩展名保持与输入一致（不会跨格式转换）
+ * - 命名规则遵循“原文件名_压缩”/“原文件名_压缩_序号”，避免重名
+ */
+export async function compressFiles(
+  filePaths: string[],
+  outputDir: string,
+  quality?: number
+): Promise<{ success: boolean; results: CompressResult[] }> {
+  if (!filePaths || filePaths.length === 0) {
+    return { success: true, results: [] };
+  }
+
+  // 质量校验与默认值处理
+  const q = typeof quality === "number" && quality >= 1 && quality <= 100 ? quality : 80;
+  await ensureDir(outputDir);
+
+  const tasks = filePaths.map(async (inputPath): Promise<CompressResult> => {
+    try {
+      const stat = await fs.stat(inputPath);
+      if (!stat.isFile()) {
+        return { inputPath, outputPath: "", success: false, error: "not a file" };
+      }
+
+      const ext = path.extname(inputPath).toLowerCase();
+      if (!isSupportedFormat(ext)) {
+        return { inputPath, outputPath: "", success: false, error: "unsupported format" };
+      }
+
+      const outputPath = await nextOutputPath(outputDir, inputPath);
+      // failOn: "none" 避免遇到损坏元数据时抛错
+      const image = sharp(inputPath, { failOn: "none" });
+
+      switch (ext) {
+        case ".jpg":
+        case ".jpeg":
+          // 使用 mozjpeg 优化 JPEG 压缩
+          await image.jpeg({ quality: q, mozjpeg: true }).toFile(outputPath);
+          break;
+        case ".png":
+          // PNG：启用调色板并提高压缩等级，quality 表示输出质量倾向
+          await image.png({ quality: q, compressionLevel: 9, palette: true }).toFile(outputPath);
+          break;
+        case ".webp":
+          // WebP 有损压缩
+          await image.webp({ quality: q }).toFile(outputPath);
+          break;
+        case ".tif":
+        case ".tiff":
+          // TIFF 有损压缩（若需无损可改用 compression/ predictor 配置）
+          await image.tiff({ quality: q }).toFile(outputPath);
+          break;
+        case ".avif":
+          // AVIF 有损压缩（可结合 chromaSubsampling 等参数进一步调优）
+          await image.avif({ quality: q }).toFile(outputPath);
+          break;
+        default:
+          return { inputPath, outputPath: "", success: false, error: "unsupported format" };
+      }
+
+      return { inputPath, outputPath, success: true };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { inputPath, outputPath: "", success: false, error: msg };
+    }
+  });
+
+  const results = await Promise.all(tasks);
+  return { success: results.every((r) => r.success), results };
 }
