@@ -1,5 +1,9 @@
 import { contextBridge } from "electron";
-import { getDirectoryContents, getBreadcrumbList } from "./module/directory";
+import {
+  getDirectoryContents,
+  getBreadcrumbList,
+  getFileInfo,
+} from "./module/directory";
 import { deleteFile, renameFile, compressFiles } from "./module/handleFile";
 
 contextBridge.exposeInMainWorld("electronAPI", {
@@ -8,4 +12,5 @@ contextBridge.exposeInMainWorld("electronAPI", {
   deleteFile, // 批量删除文件
   renameFile, // 重命名文件
   compressFiles, // 批量压缩图片
+  getFileInfo, // 获取文件详细信息
 });

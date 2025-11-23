@@ -37,6 +37,19 @@ export type BreadcrumbList = {
 }[];
 
 /**
+ * 文件详情
+ */
+export type FileInfo = {
+  name: string;
+  type: string;
+  size: number;
+  createdAt: number;
+  modifiedAt: number;
+  width?: number;
+  height?: number;
+};
+
+/**
  * 下拉菜单枚举
  */
 export enum DropdownMenuEnum {
@@ -81,7 +94,16 @@ declare global {
         filePaths: string[],
         outputDir: string,
         quality?: number
-      ) => Promise<{ success: boolean; results: { inputPath: string; outputPath: string; success: boolean; error?: string }[] }>; // 批量压缩图片
+      ) => Promise<{
+        success: boolean;
+        results: {
+          inputPath: string;
+          outputPath: string;
+          success: boolean;
+          error?: string;
+        }[];
+      }>; // 批量压缩图片
+      getFileInfo: (filePath: string) => Promise<FileInfo>;
     };
   }
 }

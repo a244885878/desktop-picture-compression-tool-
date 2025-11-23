@@ -2,6 +2,7 @@ import { promises as fs } from "fs";
 import * as path from "path";
 import * as os from "os";
 import { FileItemTypeEnum, type FileItem, type BreadcrumbList } from "@/types";
+import sharp from "sharp";
 
 /**
  * 获取目录内容（文件夹和图片文件）
@@ -244,4 +245,90 @@ export function getBreadcrumbList(dirPath?: string): BreadcrumbList {
   }
 
   return breadcrumbList;
+}
+
+/**
+ * 获取文件或目录的详细信息
+ * @param filePath 文件或目录的完整路径
+ * @returns Promise<{
+ *   name: string; // 文件名或目录名
+ *   type: string; // 文件类型
+ *   size: number; // 文件大小（字节），文件夹返回 0
+ *   createdAt: number; // 创建时间（毫秒级时间戳）
+ *   modifiedAt: number; // 最后修改时间（毫秒级时间戳）
+ *   width?: number; // 图片宽度（像素），非图片文件返回 undefined
+ *   height?: number; // 图片高度（像素），非图片文件返回 undefined
+ * }> 文件或目录的详细信息
+ */
+export async function getFileInfo(filePath: string): Promise<{
+  name: string;
+  type: string;
+  size: number;
+  createdAt: number;
+  modifiedAt: number;
+  width?: number;
+  height?: number;
+}> {
+  const stats = await fs.stat(filePath);
+  const isDir = stats.isDirectory();
+  const name = path.basename(filePath);
+  const size = isDir ? 0 : stats.size;
+  const createdAt = stats.birthtimeMs;
+  const modifiedAt = stats.mtimeMs;
+  if (isDir) {
+    return {
+      name,
+      type: "folder",
+      size,
+      createdAt,
+      modifiedAt,
+    };
+  }
+  const ext = path.extname(filePath).toLowerCase();
+  const extName = ext.startsWith(".") ? ext.slice(1) : ext;
+  const imageExtensions = [
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".gif",
+    ".bmp",
+    ".webp",
+    ".svg",
+    ".ico",
+    ".tiff",
+    ".tif",
+    ".raw",
+    ".heic",
+    ".heif",
+    ".avif",
+  ];
+  if (imageExtensions.includes(ext)) {
+    try {
+      const meta = await sharp(filePath, { failOn: "none" }).metadata();
+      return {
+        name,
+        type: extName,
+        size,
+        createdAt,
+        modifiedAt,
+        width: meta.width,
+        height: meta.height,
+      };
+    } catch {
+      return {
+        name,
+        type: extName,
+        size,
+        createdAt,
+        modifiedAt,
+      };
+    }
+  }
+  return {
+    name,
+    type: extName,
+    size,
+    createdAt,
+    modifiedAt,
+  };
 }

@@ -17,6 +17,7 @@ import type { MenuProps } from "antd";
 import { DropdownMenuEnum } from "@/types";
 import RenameModal from "@/components/RenameModal";
 import CompressedFilesModal from "../CompressedFilesModal";
+import DetailsModal from "../DetailsModal";
 
 const Directory: React.FC = () => {
   const [list, setList] = useImmer<FileItem[]>([]); // 列表数据
@@ -30,6 +31,7 @@ const Directory: React.FC = () => {
   const [loading, setLoading] = useImmer(false); // 是否加载中
   const [compressedFilesModalOpen, setCompressedFilesModalOpen] =
     useImmer(false); // 压缩文件弹窗是否打开
+  const [detailsModalOpen, setDetailsModalOpen] = useImmer(false); // 详情弹窗是否打开
 
   const { message } = App.useApp();
 
@@ -62,6 +64,12 @@ const Directory: React.FC = () => {
       {
         key: DropdownMenuEnum.DETAIL,
         label: <span>详情</span>,
+        onClick: async () => {
+          if (window.electronAPI) {
+            currentFile.current = item;
+            setDetailsModalOpen(true);
+          }
+        },
       },
       {
         key: DropdownMenuEnum.FORMAT_CONVERT,
@@ -291,6 +299,13 @@ const Directory: React.FC = () => {
         onOk={refreshList}
         onCancel={() => setCompressedFilesModalOpen(false)}
         selectedFiles={selectedFiles}
+      />
+      {/* 详情弹窗 */}
+      <DetailsModal
+        open={detailsModalOpen}
+        onOk={() => setDetailsModalOpen(false)}
+        onCancel={() => setDetailsModalOpen(false)}
+        file={currentFile.current!}
       />
     </div>
   );
