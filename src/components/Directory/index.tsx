@@ -17,6 +17,7 @@ import type { MenuProps } from "antd";
 import { DropdownMenuEnum } from "@/types";
 import RenameModal from "@/components/RenameModal";
 import CompressedFilesModal from "../CompressedFilesModal";
+import ConvertFilesModal from "../ConvertFilesModal";
 import DetailsModal from "../DetailsModal";
 
 const Directory: React.FC = () => {
@@ -31,6 +32,7 @@ const Directory: React.FC = () => {
   const [loading, setLoading] = useImmer(false); // 是否加载中
   const [compressedFilesModalOpen, setCompressedFilesModalOpen] =
     useImmer(false); // 压缩文件弹窗是否打开
+  const [convertFilesModalOpen, setConvertFilesModalOpen] = useImmer(false); // 转换文件弹窗是否打开
   const [detailsModalOpen, setDetailsModalOpen] = useImmer(false); // 详情弹窗是否打开
 
   const { message } = App.useApp();
@@ -74,6 +76,10 @@ const Directory: React.FC = () => {
       {
         key: DropdownMenuEnum.FORMAT_CONVERT,
         label: <span>格式转换</span>,
+        onClick: () => {
+          setSelectedFiles([item]);
+          setConvertFilesModalOpen(true);
+        },
       },
       {
         key: DropdownMenuEnum.CROP,
@@ -111,7 +117,12 @@ const Directory: React.FC = () => {
   // 记录选中的文件
   const handleCheckboxChange = (item: FileItem, checked: boolean) => {
     if (checked) {
-      setSelectedFiles([...selectedFiles, item]);
+      if (selectedFiles.length >= 10) {
+        message.warning("为避免可能出现的性能问题，一次最多勾选10个文件");
+        return;
+      }
+      const next = [...selectedFiles, item];
+      setSelectedFiles(next);
     } else {
       setSelectedFiles(selectedFiles.filter((file) => file.path !== item.path));
     }
@@ -275,7 +286,11 @@ const Directory: React.FC = () => {
               >
                 批量压缩
               </Button>
-              <Button color="primary" variant="text">
+              <Button
+                color="primary"
+                variant="text"
+                onClick={() => setConvertFilesModalOpen(true)}
+              >
                 批量格式转换
               </Button>
               <Button color="primary" variant="text">
@@ -298,6 +313,14 @@ const Directory: React.FC = () => {
         currentDirectory={currentPath!}
         onOk={refreshList}
         onCancel={() => setCompressedFilesModalOpen(false)}
+        selectedFiles={selectedFiles}
+      />
+      {/* 转换文件格式弹窗 */}
+      <ConvertFilesModal
+        open={convertFilesModalOpen}
+        currentDirectory={currentPath!}
+        onOk={refreshList}
+        onCancel={() => setConvertFilesModalOpen(false)}
         selectedFiles={selectedFiles}
       />
       {/* 详情弹窗 */}

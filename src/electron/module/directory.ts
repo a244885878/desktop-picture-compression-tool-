@@ -3,6 +3,8 @@ import * as path from "path";
 import * as os from "os";
 import { FileItemTypeEnum, type FileItem, type BreadcrumbList } from "@/types";
 import sharp from "sharp";
+import bmp from "sharp-bmp";
+const WINDOWS_DRIVES_ROOT = "WIN_DRIVES_ROOT";
 
 /**
  * 获取目录内容（文件夹和图片文件）
@@ -29,6 +31,10 @@ export async function getDirectoryContents(
         // 其他类Unix系统：使用主目录
         targetPath = os.homedir();
       }
+    }
+
+    if (os.platform() === "win32" && targetPath === WINDOWS_DRIVES_ROOT) {
+      return await getWindowsDrives();
     }
 
     // 读取目录内容
@@ -184,8 +190,8 @@ export function getBreadcrumbList(dirPath?: string): BreadcrumbList {
       // Mac系统：默认读取桌面目录
       targetPath = path.join(os.homedir(), "Desktop");
     } else if (platform === "win32") {
-      // Windows系统：返回空数组，因为显示的是驱动器列表
-      return [];
+      // Windows系统：返回根“计算机”节点
+      return [{ title: "计算机", path: WINDOWS_DRIVES_ROOT }];
     } else {
       // 其他类Unix系统：使用主目录
       targetPath = os.homedir();
@@ -199,6 +205,9 @@ export function getBreadcrumbList(dirPath?: string): BreadcrumbList {
     // Windows 路径处理
     const normalized = path.resolve(targetPath);
     const parts = normalized.split(path.sep);
+
+    // 根“计算机”
+    breadcrumbList.push({ title: "计算机", path: WINDOWS_DRIVES_ROOT });
 
     // 第一个部分是驱动器（如 "C:"）
     let currentPath = parts[0] + path.sep; // "C:\"
@@ -303,6 +312,29 @@ export async function getFileInfo(filePath: string): Promise<{
     ".avif",
   ];
   if (imageExtensions.includes(ext)) {
+    if (ext === ".bmp") {
+      try {
+        const buffer = await fs.readFile(filePath);
+        const bitmap = bmp.decode(buffer);
+        return {
+          name,
+          type: extName,
+          size,
+          createdAt,
+          modifiedAt,
+          width: bitmap.width,
+          height: bitmap.height,
+        };
+      } catch {
+        return {
+          name,
+          type: extName,
+          size,
+          createdAt,
+          modifiedAt,
+        };
+      }
+    }
     try {
       const meta = await sharp(filePath, { failOn: "none" }).metadata();
       return {

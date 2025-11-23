@@ -1,5 +1,7 @@
 import { promises as fs } from "fs";
 import sharp from "sharp"; // 使用 sharp 进行跨格式图片压缩与编码
+import bmp from "sharp-bmp";
+import { FileItemTypeEnum, type FileItem } from "@/types";
 import * as path from "path";
 
 /**
@@ -120,6 +122,8 @@ export async function renameFile(
  */
 type CompressResult = { inputPath: string; outputPath: string; success: boolean; error?: string };
 
+type ConvertResult = { inputPath: string; outputPath: string; success: boolean; error?: string };
+
 /**
  * 判断是否为支持的图片格式
  * 支持：jpg/jpeg、png、webp、tif/tiff、avif
@@ -165,6 +169,35 @@ async function nextOutputPath(outputDir: string, inputPath: string) {
       candidate = path.join(outputDir, `${candidateBase}${ext}`);
     } catch {
       // 文件不存在，当前候选名可用
+      return candidate;
+    }
+  }
+}
+
+/**
+ * 根据命名规则生成“转换”后的输出文件路径并避免重名
+ * 规则：
+ * - 原文件名不包含“_转换”：name.ext → name_转换.<targetExt>
+ * - 原文件名已包含“_转换”：name_转换.ext → name_转换_1.<targetExt>；name_转换_3.ext → name_转换_4.<targetExt>
+ * - 若目标已存在，则继续递增编号，直到找到可用文件名
+ */
+async function nextConvertedOutputPath(outputDir: string, inputPath: string, targetExt: string) {
+  const ext = path.extname(inputPath);
+  const base = path.basename(inputPath, ext);
+  const m = base.match(/^(.*)_转换(?:_(\d+))?$/);
+  const root = m ? m[1] : base;
+  let n = m && m[2] ? parseInt(m[2], 10) + 1 : m ? 1 : 0;
+
+  let candidateBase = n === 0 ? `${root}_转换` : `${root}_转换_${n}`;
+  let candidate = path.join(outputDir, `${candidateBase}${targetExt}`);
+
+  while (true) {
+    try {
+      await fs.access(candidate);
+      n = n === 0 ? 1 : n + 1;
+      candidateBase = `${root}_转换_${n}`;
+      candidate = path.join(outputDir, `${candidateBase}${targetExt}`);
+    } catch {
       return candidate;
     }
   }
@@ -246,5 +279,67 @@ export async function compressFiles(
   });
 
   const results = await Promise.all(tasks);
+  return { success: results.every((r) => r.success), results };
+}
+
+/**
+ * 批量格式转换（不影响原文件）
+ * @param files 文件对象数组（仅图片类型有效）
+ * @param outputDir 输出目录（不存在将自动创建）
+ * @param targetFormat 目标格式（支持 jpg、png、bmp）
+ * @returns { success, results }：总体成功标记与逐项结果
+ *
+ * 行为说明：
+ * - 非图片或非文件会返回失败项，但不影响其他文件处理
+ * - 始终生成新文件，命名遵循“原文件名_转换”/“原文件名_转换_序号”，避免重名
+ * - JPG 采用 mozjpeg 优化；PNG 使用默认编码；BMP 通过 sharp-bmp 输出
+ */
+export async function convertFiles(
+  tasks: { file: FileItem; targetFormat: "jpg" | "png" | "bmp" }[],
+  outputDir: string
+): Promise<{ success: boolean; results: ConvertResult[] }> {
+  if (!tasks || tasks.length === 0) {
+    return { success: true, results: [] };
+  }
+
+  await ensureDir(outputDir);
+
+  const jobs = tasks.map(async ({ file, targetFormat }): Promise<ConvertResult> => {
+    const inputPath = file.path;
+    try {
+      if (file.type !== FileItemTypeEnum.IMAGE) {
+        return { inputPath, outputPath: "", success: false, error: "not an image" };
+      }
+
+      const stat = await fs.stat(inputPath);
+      if (!stat.isFile()) {
+        return { inputPath, outputPath: "", success: false, error: "not a file" };
+      }
+
+      const fmt = String(targetFormat).toLowerCase();
+      if (!["jpg", "png", "bmp"].includes(fmt)) {
+        return { inputPath, outputPath: "", success: false, error: "unsupported target format" };
+      }
+
+      const targetExt = fmt === "jpg" ? ".jpg" : fmt === "png" ? ".png" : ".bmp";
+      const outputPath = await nextConvertedOutputPath(outputDir, inputPath, targetExt);
+      const image = sharp(inputPath, { failOn: "none" });
+
+      if (fmt === "jpg") {
+        await image.jpeg({ mozjpeg: true }).toFile(outputPath);
+      } else if (fmt === "png") {
+        await image.png().toFile(outputPath);
+      } else {
+        await bmp.sharpToBmp(image, outputPath);
+      }
+
+      return { inputPath, outputPath, success: true };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { inputPath, outputPath: "", success: false, error: msg };
+    }
+  });
+
+  const results = await Promise.all(jobs);
   return { success: results.every((r) => r.success), results };
 }

@@ -103,6 +103,18 @@ declare global {
           error?: string;
         }[];
       }>; // 批量压缩图片
+      convertFiles: (
+        tasks: { file: FileItem; targetFormat: "jpg" | "png" | "bmp" }[],
+        outputDir: string
+      ) => Promise<{
+        success: boolean;
+        results: {
+          inputPath: string;
+          outputPath: string;
+          success: boolean;
+          error?: string;
+        }[];
+      }>; // 批量格式转换
       getFileInfo: (filePath: string) => Promise<FileInfo>;
     };
   }
