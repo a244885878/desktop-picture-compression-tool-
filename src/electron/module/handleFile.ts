@@ -124,6 +124,8 @@ type CompressResult = { inputPath: string; outputPath: string; success: boolean;
 
 type ConvertResult = { inputPath: string; outputPath: string; success: boolean; error?: string };
 
+type WatermarkResult = { inputPath: string; outputPath: string; success: boolean; error?: string };
+
 /**
  * 判断是否为支持的图片格式
  * 支持：jpg/jpeg、png、webp、tif/tiff、avif
@@ -141,6 +143,34 @@ async function ensureDir(dir: string) {
     await fs.mkdir(dir, { recursive: true });
   } catch {
     return;
+  }
+}
+
+async function resolveOutputDir(dir: string): Promise<string> {
+  const abs = path.resolve(dir);
+  try {
+    const stat = await fs.stat(abs);
+    const target = stat.isDirectory() ? abs : path.dirname(abs);
+    await ensureDir(target);
+    try {
+      await fs.access(target);
+    } catch {
+      void 0;
+    }
+    try {
+      const real = await fs.realpath(target);
+      return real;
+    } catch {
+      return target;
+    }
+  } catch {
+    await ensureDir(abs);
+    try {
+      const real = await fs.realpath(abs);
+      return real;
+    } catch {
+      return abs;
+    }
   }
 }
 
@@ -203,6 +233,28 @@ async function nextConvertedOutputPath(outputDir: string, inputPath: string, tar
   }
 }
 
+async function nextWatermarkOutputPath(outputDir: string, inputPath: string) {
+  const ext = path.extname(inputPath);
+  const base = path.basename(inputPath, ext);
+  const m = base.match(/^(.*)_水印(?:_(\d+))?$/);
+  const root = m ? m[1] : base;
+  let n = m && m[2] ? parseInt(m[2], 10) + 1 : m ? 1 : 0;
+
+  let candidateBase = n === 0 ? `${root}_水印` : `${root}_水印_${n}`;
+  let candidate = path.join(outputDir, `${candidateBase}${ext}`);
+
+  while (true) {
+    try {
+      await fs.access(candidate);
+      n = n === 0 ? 1 : n + 1;
+      candidateBase = `${root}_水印_${n}`;
+      candidate = path.join(outputDir, `${candidateBase}${ext}`);
+    } catch {
+      return candidate;
+    }
+  }
+}
+
 /**
  * 批量压缩图片文件
  * @param filePaths 需要压缩的图片绝对路径数组（仅文件）
@@ -226,7 +278,7 @@ export async function compressFiles(
 
   // 质量校验与默认值处理
   const q = typeof quality === "number" && quality >= 1 && quality <= 100 ? quality : 80;
-  await ensureDir(outputDir);
+  const targetDir = await resolveOutputDir(outputDir);
 
   const tasks = filePaths.map(async (inputPath): Promise<CompressResult> => {
     try {
@@ -240,7 +292,7 @@ export async function compressFiles(
         return { inputPath, outputPath: "", success: false, error: "unsupported format" };
       }
 
-      const outputPath = await nextOutputPath(outputDir, inputPath);
+      const outputPath = await nextOutputPath(targetDir, inputPath);
       // failOn: "none" 避免遇到损坏元数据时抛错
       const image = sharp(inputPath, { failOn: "none" });
 
@@ -302,7 +354,7 @@ export async function convertFiles(
     return { success: true, results: [] };
   }
 
-  await ensureDir(outputDir);
+  const targetDir = await resolveOutputDir(outputDir);
 
   const jobs = tasks.map(async ({ file, targetFormat }): Promise<ConvertResult> => {
     const inputPath = file.path;
@@ -322,7 +374,7 @@ export async function convertFiles(
       }
 
       const targetExt = fmt === "jpg" ? ".jpg" : fmt === "png" ? ".png" : ".bmp";
-      const outputPath = await nextConvertedOutputPath(outputDir, inputPath, targetExt);
+      const outputPath = await nextConvertedOutputPath(targetDir, inputPath, targetExt);
       const image = sharp(inputPath, { failOn: "none" });
 
       if (fmt === "jpg") {
@@ -340,6 +392,145 @@ export async function convertFiles(
     }
   });
 
+  const results = await Promise.all(jobs);
+  return { success: results.every((r) => r.success), results };
+}
+
+function escapeXml(s: string) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+}
+
+// 删除单图加水印 API，批量 API 已覆盖单图场景
+
+type WatermarkPosition = "top-left" | "top-right" | "bottom-left" | "bottom-right" | "center";
+
+function buildWatermarkSvg(
+  width: number,
+  height: number,
+  text: string,
+  color: string,
+  fontSize: number,
+  position: WatermarkPosition,
+  padding: number,
+  angle: number
+) {
+  let x = width - padding;
+  let y = height - padding;
+  let anchor = "end";
+  let baseline = "alphabetic";
+  switch (position) {
+    case "top-left":
+      x = padding;
+      y = padding + fontSize;
+      anchor = "start";
+      break;
+    case "top-right":
+      x = width - padding;
+      y = padding + fontSize;
+      anchor = "end";
+      break;
+    case "bottom-left":
+      x = padding;
+      y = height - padding;
+      anchor = "start";
+      break;
+    case "bottom-right":
+      x = width - padding;
+      y = height - padding;
+      anchor = "end";
+      break;
+    case "center":
+      x = Math.round(width / 2);
+      y = Math.round(height / 2);
+      anchor = "middle";
+      baseline = "middle";
+      break;
+  }
+  const rotate = Number.isFinite(angle) ? Math.round(angle) : 0;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><text x="${x}" y="${y}" text-anchor="${anchor}" dominant-baseline="${baseline}" font-family="sans-serif" font-size="${fontSize}" fill="${color}" paint-order="stroke" stroke="rgba(0,0,0,0.5)" stroke-width="2" transform="rotate(${rotate} ${x} ${y})">${text}</text></svg>`;
+  return Buffer.from(svg);
+}
+
+function buildWatermarkSvgAt(
+  width: number,
+  height: number,
+  text: string,
+  color: string,
+  fontSize: number,
+  x: number,
+  y: number,
+  angle: number
+) {
+  const rotate = Number.isFinite(angle) ? Math.round(angle) : 0;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="middle" font-family="sans-serif" font-size="${fontSize}" fill="${color}" paint-order="stroke" stroke="rgba(0,0,0,0.5)" stroke-width="2" transform="rotate(${rotate} ${x} ${y})">${text}</text></svg>`;
+  return Buffer.from(svg);
+}
+
+export async function addWatermarks(
+  files: FileItem[],
+  text: string,
+  outputDir: string,
+  opts?: { fontSize?: number; color?: string; position?: WatermarkPosition; padding?: number; angle?: number; xRatio?: number; yRatio?: number }
+): Promise<{ success: boolean; results: WatermarkResult[] }> {
+  if (!files || files.length === 0) {
+    return { success: true, results: [] };
+  }
+  const content = (text ?? "").trim();
+  if (!content) {
+    return {
+      success: false,
+      results: files.map((f) => ({ inputPath: f.path, outputPath: "", success: false, error: "watermark text empty" })),
+    };
+  }
+  if (content.length > 10) {
+    return {
+      success: false,
+      results: files.map((f) => ({ inputPath: f.path, outputPath: "", success: false, error: "watermark text too long" })),
+    };
+  }
+  const targetDir = await resolveOutputDir(outputDir);
+  const safeText = escapeXml(content);
+  const jobs = files.map(async (file): Promise<WatermarkResult> => {
+    const inputPath = file.path;
+    try {
+      if (file.type !== FileItemTypeEnum.IMAGE) {
+        return { inputPath, outputPath: "", success: false, error: "not an image" };
+      }
+      const stat = await fs.stat(inputPath);
+      if (!stat.isFile()) {
+        return { inputPath, outputPath: "", success: false, error: "not a file" };
+      }
+      const meta = await sharp(inputPath, { failOn: "none" }).metadata();
+      const width = meta.width ?? 0;
+      const height = meta.height ?? 0;
+      if (!width || !height) {
+        throw new Error("无法读取图片尺寸");
+      }
+      const paddingDefault = Math.max(10, Math.round(Math.min(width, height) * 0.03));
+      const fontDefault = Math.max(16, Math.round(Math.min(width, height) * 0.05));
+      const fontSize = opts?.fontSize && opts.fontSize > 0 ? Math.round(opts.fontSize) : fontDefault;
+      const color = opts?.color && opts.color.trim() ? opts.color.trim() : "rgba(255,255,255,0.75)";
+      const angle = opts?.angle ?? 0;
+      let svg: Buffer;
+      if (typeof opts?.xRatio === "number" && typeof opts?.yRatio === "number") {
+        const xr = Math.max(0, Math.min(1, opts.xRatio));
+        const yr = Math.max(0, Math.min(1, opts.yRatio));
+        const x = Math.round(width * xr);
+        const y = Math.round(height * yr);
+        svg = buildWatermarkSvgAt(width, height, safeText, color, fontSize, x, y, angle);
+      } else {
+        const position = opts?.position ?? "bottom-right";
+        const pad = opts?.padding && opts.padding > 0 ? Math.round(opts.padding) : paddingDefault;
+        svg = buildWatermarkSvg(width, height, safeText, color, fontSize, position, pad, angle);
+      }
+      const outputPath = await nextWatermarkOutputPath(targetDir, inputPath);
+      await sharp(inputPath, { failOn: "none" }).composite([{ input: svg }]).toFile(outputPath);
+      return { inputPath, outputPath, success: true };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { inputPath, outputPath: "", success: false, error: msg };
+    }
+  });
   const results = await Promise.all(jobs);
   return { success: results.every((r) => r.success), results };
 }

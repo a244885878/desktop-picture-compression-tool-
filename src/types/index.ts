@@ -115,6 +115,33 @@ declare global {
           error?: string;
         }[];
       }>; // 批量格式转换
+      addWatermarks: (
+        files: FileItem[],
+        text: string,
+        outputDir: string,
+        opts?: {
+          fontSize?: number;
+          color?: string;
+          position?:
+            | "top-left"
+            | "top-right"
+            | "bottom-left"
+            | "bottom-right"
+            | "center";
+          padding?: number;
+          angle?: number;
+          xRatio?: number;
+          yRatio?: number;
+        }
+      ) => Promise<{
+        success: boolean;
+        results: {
+          inputPath: string;
+          outputPath: string;
+          success: boolean;
+          error?: string;
+        }[];
+      }>; // 加水印
       getFileInfo: (filePath: string) => Promise<FileInfo>;
     };
   }

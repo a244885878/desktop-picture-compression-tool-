@@ -48,6 +48,8 @@ const DetailsModal: React.FC<DetailsModalProps> = ({
       open={open}
       onOk={onOk}
       onCancel={onCancel}
+      maskClosable={false}
+      keyboard={false}
       loading={loading}
     >
       {fileDetails && (

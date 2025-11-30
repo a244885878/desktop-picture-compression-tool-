@@ -43,6 +43,10 @@ const CompressedFilesModal: React.FC<CompressedFilesModalProps> = ({
         values.compressQuality
       );
       setConfirmLoading(false);
+      const outDir = values.isUseCurrentDir ? currentDirectory : values.outputDir;
+      if (outDir) {
+        window.dispatchEvent(new CustomEvent<string>("refresh-directory", { detail: outDir }));
+      }
       onOk?.();
       onCancel?.();
       message.success("压缩文件成功");
@@ -70,6 +74,8 @@ const CompressedFilesModal: React.FC<CompressedFilesModalProps> = ({
       open={open}
       onOk={() => form.submit()}
       onCancel={() => onCancel?.()}
+      maskClosable={false}
+      keyboard={false}
       confirmLoading={confirmLoading}
     >
       <Form layout="vertical" form={form} onFinish={onFinish}>

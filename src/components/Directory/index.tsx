@@ -18,6 +18,7 @@ import { DropdownMenuEnum } from "@/types";
 import RenameModal from "@/components/RenameModal";
 import CompressedFilesModal from "../CompressedFilesModal";
 import ConvertFilesModal from "../ConvertFilesModal";
+import WatermarkModal from "../WatermarkModal";
 import DetailsModal from "../DetailsModal";
 
 const Directory: React.FC = () => {
@@ -33,6 +34,7 @@ const Directory: React.FC = () => {
   const [compressedFilesModalOpen, setCompressedFilesModalOpen] =
     useImmer(false); // 压缩文件弹窗是否打开
   const [convertFilesModalOpen, setConvertFilesModalOpen] = useImmer(false); // 转换文件弹窗是否打开
+  const [watermarkModalOpen, setWatermarkModalOpen] = useImmer(false); // 加水印弹窗是否打开
   const [detailsModalOpen, setDetailsModalOpen] = useImmer(false); // 详情弹窗是否打开
 
   const { message } = App.useApp();
@@ -88,6 +90,10 @@ const Directory: React.FC = () => {
       {
         key: DropdownMenuEnum.WATERMARK,
         label: <span>加水印</span>,
+        onClick: () => {
+          setSelectedFiles([item]);
+          setWatermarkModalOpen(true);
+        },
       },
     ];
     return menu;
@@ -99,6 +105,7 @@ const Directory: React.FC = () => {
       if (window.electronAPI) {
         setLoading(true);
         setCurrentPath(path);
+        setBatchOperation(false);
         try {
           const res = await window.electronAPI.getDirectoryContents(path);
           setList(res);
@@ -111,7 +118,14 @@ const Directory: React.FC = () => {
         }
       }
     },
-    [setCurrentPath, setList, setIsEmpty, setBreadcrumb, setLoading]
+    [
+      setCurrentPath,
+      setList,
+      setIsEmpty,
+      setBreadcrumb,
+      setLoading,
+      setBatchOperation,
+    ]
   );
 
   // 记录选中的文件
@@ -142,6 +156,8 @@ const Directory: React.FC = () => {
         content: "删除后将无法恢复，请谨慎操作。",
         okText: "确认",
         cancelText: "取消",
+        maskClosable: false,
+        keyboard: false,
         async onOk() {
           setLoading(true);
           try {
@@ -171,6 +187,18 @@ const Directory: React.FC = () => {
 
   useEffect(() => {
     getDirectory();
+  }, [getDirectory]);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const ce = e as CustomEvent<string>;
+      const p = ce.detail;
+      if (p && typeof p === "string") {
+        getDirectory(p);
+      }
+    };
+    window.addEventListener("refresh-directory", handler as EventListener);
+    return () => window.removeEventListener("refresh-directory", handler as EventListener);
   }, [getDirectory]);
 
   // 动态显示文件类型
@@ -293,9 +321,7 @@ const Directory: React.FC = () => {
               >
                 批量格式转换
               </Button>
-              <Button color="primary" variant="text">
-                批量加水印
-              </Button>
+              
             </div>
           )}
         </div>
@@ -321,6 +347,13 @@ const Directory: React.FC = () => {
         currentDirectory={currentPath!}
         onOk={refreshList}
         onCancel={() => setConvertFilesModalOpen(false)}
+        selectedFiles={selectedFiles}
+      />
+      <WatermarkModal
+        open={watermarkModalOpen}
+        currentDirectory={currentPath!}
+        onOk={refreshList}
+        onCancel={() => setWatermarkModalOpen(false)}
         selectedFiles={selectedFiles}
       />
       {/* 详情弹窗 */}

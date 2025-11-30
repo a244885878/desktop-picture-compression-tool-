@@ -28,7 +28,9 @@ const ConvertFilesModal: React.FC<ConvertFilesModalProps> = ({
   const isUseCurrentDir = Form.useWatch("isUseCurrentDir", form);
   const [confirmLoading, setConfirmLoading] = useState(false);
   const { message } = App.useApp();
-  const [targets, setTargets] = useState<Record<string, "jpg" | "png" | "bmp">>({});
+  const [targets, setTargets] = useState<Record<string, "jpg" | "png" | "bmp">>(
+    {}
+  );
   const getExt = (name: string) => {
     const idx = name.lastIndexOf(".");
     const ext = idx >= 0 ? name.slice(idx + 1).toLowerCase() : "";
@@ -79,7 +81,7 @@ const ConvertFilesModal: React.FC<ConvertFilesModalProps> = ({
         return next;
       });
     }
-  }, [open, form, currentDirectory]);
+  }, [open, form, currentDirectory, selectedFiles, getExt, defaultTargetFor]);
 
   return (
     <Modal
@@ -89,6 +91,8 @@ const ConvertFilesModal: React.FC<ConvertFilesModalProps> = ({
       onOk={() => form.submit()}
       onCancel={() => onCancel?.()}
       confirmLoading={confirmLoading}
+      maskClosable={false}
+      keyboard={false}
     >
       <Form layout="vertical" form={form} onFinish={onFinish}>
         <Form.Item<FormType> label="已选文件">
@@ -125,17 +129,35 @@ const ConvertFilesModal: React.FC<ConvertFilesModalProps> = ({
               const disableBmp = ext === "bmp";
               const val = targets[f.path] ?? defaultTargetFor(f.name);
               return (
-                <div key={f.path} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <Tag bordered={false} color="processing" style={{ minWidth: 160 }}>{f.name}</Tag>
+                <div
+                  key={f.path}
+                  style={{ display: "flex", alignItems: "center", gap: 8 }}
+                >
+                  <Tag
+                    bordered={false}
+                    color="processing"
+                    style={{ minWidth: 160 }}
+                  >
+                    {f.name}
+                  </Tag>
                   <Radio.Group
                     value={val}
                     onChange={(e) =>
-                      setTargets((prev) => ({ ...prev, [f.path]: e.target.value }))
+                      setTargets((prev) => ({
+                        ...prev,
+                        [f.path]: e.target.value,
+                      }))
                     }
                   >
-                    <Radio.Button value="jpg" disabled={disableJpg}>JPG</Radio.Button>
-                    <Radio.Button value="png" disabled={disablePng}>PNG</Radio.Button>
-                    <Radio.Button value="bmp" disabled={disableBmp}>BMP</Radio.Button>
+                    <Radio.Button value="jpg" disabled={disableJpg}>
+                      JPG
+                    </Radio.Button>
+                    <Radio.Button value="png" disabled={disablePng}>
+                      PNG
+                    </Radio.Button>
+                    <Radio.Button value="bmp" disabled={disableBmp}>
+                      BMP
+                    </Radio.Button>
                   </Radio.Group>
                 </div>
               );

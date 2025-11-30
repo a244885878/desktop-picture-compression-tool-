@@ -4,7 +4,13 @@ import {
   getBreadcrumbList,
   getFileInfo,
 } from "./module/directory";
-import { deleteFile, renameFile, compressFiles, convertFiles } from "./module/handleFile";
+import {
+  deleteFile,
+  renameFile,
+  compressFiles,
+  convertFiles,
+  addWatermarks,
+} from "./module/handleFile";
 
 contextBridge.exposeInMainWorld("electronAPI", {
   getDirectoryContents, // 获取目录内容
@@ -13,5 +19,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   renameFile, // 重命名文件
   compressFiles, // 批量压缩图片
   convertFiles, // 批量格式转换
+  addWatermarks, // 加水印
   getFileInfo, // 获取文件详细信息
 });

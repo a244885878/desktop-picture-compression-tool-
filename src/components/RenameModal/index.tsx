@@ -69,6 +69,8 @@ const RenameModal: React.FC<RenameModalProps> = ({
       open={open}
       onOk={() => form.submit()}
       onCancel={() => onCancel?.()}
+      maskClosable={false}
+      keyboard={false}
     >
       <Form form={form} onFinish={onFinish}>
         <Form.Item<FormType>
