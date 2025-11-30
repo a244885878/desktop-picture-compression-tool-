@@ -22,26 +22,181 @@ export async function deleteFile(filePaths: string[]): Promise<boolean> {
   const results = await Promise.all(
     filePaths.map(async (filePath) => {
       try {
-        const stats = await fs.stat(filePath);
+        // 规范化路径，避免路径问题
+        let normalizedPath: string;
+        try {
+          normalizedPath = path.resolve(filePath);
+        } catch (pathError) {
+          const pathErrorMsg =
+            pathError instanceof Error ? pathError.message : String(pathError);
+          console.error(`路径解析失败: ${filePath}`, pathErrorMsg);
+          return false;
+        }
+
+        // 检查文件是否存在
+        let stats;
+        try {
+          stats = await fs.stat(normalizedPath);
+        } catch (statError) {
+          const statErrorMsg =
+            statError instanceof Error ? statError.message : String(statError);
+          console.error(
+            `文件不存在或无法访问: ${normalizedPath}`,
+            statErrorMsg
+          );
+          return false;
+        }
 
         if (stats.isDirectory()) {
           // 如果是文件夹，递归删除
-          await fs.rm(filePath, { recursive: true, force: true });
+          try {
+            await fs.rm(normalizedPath, { recursive: true, force: true });
+            console.log(`成功删除文件夹: ${normalizedPath}`);
+          } catch (rmError) {
+            const rmErrorMsg =
+              rmError instanceof Error ? rmError.message : String(rmError);
+            console.error(`删除文件夹失败: ${normalizedPath}`, rmErrorMsg);
+            throw rmError;
+          }
         } else {
-          // 如果是文件，直接删除
-          await fs.unlink(filePath);
+          // 如果是文件，尝试删除
+          try {
+            // 先尝试直接删除
+            await fs.unlink(normalizedPath);
+            console.log(`成功删除文件: ${normalizedPath}`);
+          } catch (unlinkError) {
+            const unlinkErrorCode =
+              unlinkError &&
+              typeof unlinkError === "object" &&
+              "code" in unlinkError
+                ? String(unlinkError.code)
+                : undefined;
+
+            // 如果是权限错误，尝试多种方式修复
+            if (unlinkErrorCode === "EACCES" || unlinkErrorCode === "EPERM") {
+              try {
+                console.log(
+                  `检测到权限错误，尝试修复文件权限: ${normalizedPath}`
+                );
+
+                // 1. 先检查并修改父目录权限（确保有写权限）
+                const parentDir = path.dirname(normalizedPath);
+                try {
+                  const parentStat = await fs.stat(parentDir);
+                  if (parentStat.isDirectory()) {
+                    // 确保父目录有写权限
+                    await fs.chmod(parentDir, 0o755);
+                    console.log(`已修改父目录权限: ${parentDir}`);
+                  }
+                } catch (parentError) {
+                  console.warn(
+                    `修改父目录权限失败（继续尝试）: ${parentDir}`,
+                    parentError
+                  );
+                }
+
+                // 2. 尝试修改文件权限
+                try {
+                  await fs.chmod(normalizedPath, 0o666);
+                  console.log(`已修改文件权限: ${normalizedPath}`);
+                } catch (chmodError) {
+                  console.warn(
+                    `修改文件权限失败（继续尝试）: ${normalizedPath}`,
+                    chmodError
+                  );
+                }
+
+                // 3. 尝试移除 macOS 扩展属性（如果存在）
+                try {
+                  const { exec } = await import("child_process");
+                  const { promisify } = await import("util");
+                  const execAsync = promisify(exec);
+                  await execAsync(`xattr -c "${normalizedPath}"`).catch(() => {
+                    // 如果 xattr 命令失败（可能没有扩展属性），忽略错误
+                    console.log(
+                      `文件没有扩展属性或无法移除: ${normalizedPath}`
+                    );
+                  });
+                } catch {
+                  // xattr 命令可能不存在或失败，忽略
+                  console.log(
+                    `无法移除扩展属性（继续尝试）: ${normalizedPath}`
+                  );
+                }
+
+                // 4. 重试删除
+                await fs.unlink(normalizedPath);
+                console.log(`成功删除文件（修复权限后）: ${normalizedPath}`);
+              } catch (retryError) {
+                // 所有修复尝试都失败
+                const retryErrorMsg =
+                  retryError instanceof Error
+                    ? retryError.message
+                    : String(retryError);
+                const retryErrorCode =
+                  retryError &&
+                  typeof retryError === "object" &&
+                  "code" in retryError
+                    ? String(retryError.code)
+                    : undefined;
+                console.error(`修复权限后仍无法删除: ${normalizedPath}`, {
+                  error: retryErrorMsg,
+                  code: retryErrorCode,
+                });
+                throw unlinkError; // 抛出原始删除错误
+              }
+            } else {
+              // 其他错误直接抛出
+              const unlinkErrorMsg =
+                unlinkError instanceof Error
+                  ? unlinkError.message
+                  : String(unlinkError);
+              console.error(`删除文件失败: ${normalizedPath}`, unlinkErrorMsg);
+              throw unlinkError;
+            }
+          }
         }
 
         return true;
       } catch (error) {
-        console.error(`删除文件失败: ${filePath}`, error);
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        const errorStack = error instanceof Error ? error.stack : undefined;
+        const errorCode =
+          error && typeof error === "object" && "code" in error
+            ? String(error.code)
+            : undefined;
+
+        // 根据错误代码提供更友好的错误信息
+        let friendlyError = errorMsg;
+        if (errorCode === "EACCES" || errorCode === "EPERM") {
+          friendlyError = `权限不足，无法删除文件。请检查文件权限或确保文件未被其他程序使用。\n原始错误: ${errorMsg}`;
+        } else if (errorCode === "EBUSY") {
+          friendlyError = `文件正在被其他程序使用，无法删除。\n原始错误: ${errorMsg}`;
+        } else if (errorCode === "ENOENT") {
+          friendlyError = `文件不存在或已被删除。\n原始错误: ${errorMsg}`;
+        }
+
+        console.error(`删除操作失败: ${filePath}`, {
+          error: errorMsg,
+          friendlyError,
+          stack: errorStack,
+          code: errorCode,
+        });
         return false;
       }
     })
   );
 
   // 全部成功才返回 true
-  return results.every((result) => result === true);
+  const allSuccess = results.every((result) => result === true);
+  if (!allSuccess) {
+    console.error(
+      `部分文件删除失败，成功: ${results.filter((r) => r).length}/${
+        results.length
+      }`
+    );
+  }
+  return allSuccess;
 }
 
 /**
@@ -120,11 +275,26 @@ export async function renameFile(
  * - success：是否压缩成功
  * - error：失败原因（仅在失败时存在）
  */
-type CompressResult = { inputPath: string; outputPath: string; success: boolean; error?: string };
+type CompressResult = {
+  inputPath: string;
+  outputPath: string;
+  success: boolean;
+  error?: string;
+};
 
-type ConvertResult = { inputPath: string; outputPath: string; success: boolean; error?: string };
+type ConvertResult = {
+  inputPath: string;
+  outputPath: string;
+  success: boolean;
+  error?: string;
+};
 
-type WatermarkResult = { inputPath: string; outputPath: string; success: boolean; error?: string };
+type WatermarkResult = {
+  inputPath: string;
+  outputPath: string;
+  success: boolean;
+  error?: string;
+};
 
 /**
  * 判断是否为支持的图片格式
@@ -132,44 +302,116 @@ type WatermarkResult = { inputPath: string; outputPath: string; success: boolean
  */
 function isSupportedFormat(ext: string) {
   const e = ext.toLowerCase();
-  return [".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff", ".avif"].includes(e);
+  return [".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff", ".avif"].includes(
+    e
+  );
 }
 
 /**
  * 确保目录存在（不存在则递归创建）
  */
-async function ensureDir(dir: string) {
+async function ensureDir(dir: string): Promise<void> {
+  // 先检查目录是否已存在
   try {
-    await fs.mkdir(dir, { recursive: true });
-  } catch {
-    return;
+    const stat = await fs.stat(dir);
+    if (stat.isDirectory()) {
+      // 目录已存在，直接返回
+      return;
+    } else {
+      // 路径存在但不是目录，抛出错误
+      throw new Error(`路径已存在但不是目录: ${dir}`);
+    }
+  } catch (error) {
+    // 目录不存在，尝试创建
+    // 如果 stat 失败是因为文件不存在，这是正常的，继续创建
+    const statError = error as NodeJS.ErrnoException;
+    if (statError.code !== "ENOENT") {
+      // 其他错误（如权限问题），直接抛出
+      throw error;
+    }
+
+    // 目录不存在，尝试创建
+    try {
+      await fs.mkdir(dir, { recursive: true });
+      // 创建后验证目录确实存在
+      const verifyStat = await fs.stat(dir);
+      if (!verifyStat.isDirectory()) {
+        throw new Error(`创建后验证失败: ${dir} 不是目录`);
+      }
+    } catch (mkdirError) {
+      const mkdirErr = mkdirError as NodeJS.ErrnoException;
+      // 如果是因为目录已存在（并发创建的情况），验证一下
+      if (mkdirErr.code === "EEXIST") {
+        try {
+          const verifyStat = await fs.stat(dir);
+          if (verifyStat.isDirectory()) {
+            return; // 目录已存在，正常返回
+          }
+        } catch {
+          // 验证失败，抛出原始错误
+        }
+      }
+      throw new Error(
+        `无法创建目录 ${dir}: ${
+          mkdirError instanceof Error ? mkdirError.message : String(mkdirError)
+        }`
+      );
+    }
   }
 }
 
 async function resolveOutputDir(dir: string): Promise<string> {
-  const abs = path.resolve(dir);
+  if (!dir || !dir.trim()) {
+    throw new Error("输出目录路径不能为空");
+  }
+
+  const abs = path.resolve(dir.trim());
+
   try {
     const stat = await fs.stat(abs);
-    const target = stat.isDirectory() ? abs : path.dirname(abs);
-    await ensureDir(target);
-    try {
-      await fs.access(target);
-    } catch {
-      void 0;
-    }
-    try {
-      const real = await fs.realpath(target);
-      return real;
-    } catch {
-      return target;
+    if (stat.isDirectory()) {
+      // 是目录，确保可访问并返回规范化路径
+      await ensureDir(abs);
+      try {
+        const real = await fs.realpath(abs);
+        return real;
+      } catch {
+        return abs;
+      }
+    } else {
+      // 是文件，使用其父目录
+      const parentDir = path.dirname(abs);
+      await ensureDir(parentDir);
+      try {
+        const real = await fs.realpath(parentDir);
+        return real;
+      } catch {
+        return parentDir;
+      }
     }
   } catch {
-    await ensureDir(abs);
+    // 路径不存在，尝试创建
+    // 先检查父目录是否存在
+    const parentDir = path.dirname(abs);
     try {
-      const real = await fs.realpath(abs);
-      return real;
+      await fs.stat(parentDir);
+      // 父目录存在，创建目标目录
+      await ensureDir(abs);
+      try {
+        const real = await fs.realpath(abs);
+        return real;
+      } catch {
+        return abs;
+      }
     } catch {
-      return abs;
+      // 父目录也不存在，递归创建
+      await ensureDir(abs);
+      try {
+        const real = await fs.realpath(abs);
+        return real;
+      } catch {
+        return abs;
+      }
     }
   }
 }
@@ -177,11 +419,13 @@ async function resolveOutputDir(dir: string): Promise<string> {
 /**
  * 根据命名规则生成输出文件路径并避免重名
  * 规则：
- * - 原文件名不包含“_压缩”：name.ext → name_压缩.ext
- * - 原文件名已包含“_压缩”：name_压缩.ext → name_压缩_1.ext；name_压缩_3.ext → name_压缩_4.ext
- * - 若目标已存在，则继续递增编号，直到找到可用文件名
+ * - 原文件名不包含"_压缩"：name.ext → name_压缩.ext
+ * - 原文件名已包含"_压缩"：name_压缩.ext → name_压缩_1.ext；name_压缩_3.ext → name_压缩_4.ext
+ * - 若目标已存在（文件或文件夹），则继续递增编号，直到找到可用文件名
  */
 async function nextOutputPath(outputDir: string, inputPath: string) {
+  // 确保输出目录是绝对路径
+  const normalizedOutputDir = path.resolve(outputDir);
   const ext = path.extname(inputPath);
   const base = path.basename(inputPath, ext);
   const m = base.match(/^(.*)_压缩(?:_(\d+))?$/);
@@ -189,29 +433,43 @@ async function nextOutputPath(outputDir: string, inputPath: string) {
   let n = m && m[2] ? parseInt(m[2], 10) + 1 : m ? 1 : 0;
 
   let candidateBase = n === 0 ? `${root}_压缩` : `${root}_压缩_${n}`;
-  let candidate = path.join(outputDir, `${candidateBase}${ext}`);
+  let candidate = path.resolve(normalizedOutputDir, `${candidateBase}${ext}`);
 
   while (true) {
     try {
-      await fs.access(candidate);
-      n = n === 0 ? 1 : n + 1;
-      candidateBase = `${root}_压缩_${n}`;
-      candidate = path.join(outputDir, `${candidateBase}${ext}`);
+      const stat = await fs.stat(candidate);
+      // 如果路径存在（无论是文件还是文件夹），都需要递增编号
+      if (stat.isFile() || stat.isDirectory()) {
+        n = n === 0 ? 1 : n + 1;
+        candidateBase = `${root}_压缩_${n}`;
+        candidate = path.resolve(normalizedOutputDir, `${candidateBase}${ext}`);
+      } else {
+        // 其他情况（如符号链接等），也递增编号
+        n = n === 0 ? 1 : n + 1;
+        candidateBase = `${root}_压缩_${n}`;
+        candidate = path.resolve(normalizedOutputDir, `${candidateBase}${ext}`);
+      }
     } catch {
-      // 文件不存在，当前候选名可用
+      // 路径不存在，当前候选名可用
       return candidate;
     }
   }
 }
 
 /**
- * 根据命名规则生成“转换”后的输出文件路径并避免重名
+ * 根据命名规则生成"转换"后的输出文件路径并避免重名
  * 规则：
- * - 原文件名不包含“_转换”：name.ext → name_转换.<targetExt>
- * - 原文件名已包含“_转换”：name_转换.ext → name_转换_1.<targetExt>；name_转换_3.ext → name_转换_4.<targetExt>
- * - 若目标已存在，则继续递增编号，直到找到可用文件名
+ * - 原文件名不包含"_转换"：name.ext → name_转换.<targetExt>
+ * - 原文件名已包含"_转换"：name_转换.ext → name_转换_1.<targetExt>；name_转换_3.ext → name_转换_4.<targetExt>
+ * - 若目标已存在（文件或文件夹），则继续递增编号，直到找到可用文件名
  */
-async function nextConvertedOutputPath(outputDir: string, inputPath: string, targetExt: string) {
+async function nextConvertedOutputPath(
+  outputDir: string,
+  inputPath: string,
+  targetExt: string
+) {
+  // 确保输出目录是绝对路径
+  const normalizedOutputDir = path.resolve(outputDir);
   const ext = path.extname(inputPath);
   const base = path.basename(inputPath, ext);
   const m = base.match(/^(.*)_转换(?:_(\d+))?$/);
@@ -219,21 +477,41 @@ async function nextConvertedOutputPath(outputDir: string, inputPath: string, tar
   let n = m && m[2] ? parseInt(m[2], 10) + 1 : m ? 1 : 0;
 
   let candidateBase = n === 0 ? `${root}_转换` : `${root}_转换_${n}`;
-  let candidate = path.join(outputDir, `${candidateBase}${targetExt}`);
+  let candidate = path.resolve(
+    normalizedOutputDir,
+    `${candidateBase}${targetExt}`
+  );
 
   while (true) {
     try {
-      await fs.access(candidate);
-      n = n === 0 ? 1 : n + 1;
-      candidateBase = `${root}_转换_${n}`;
-      candidate = path.join(outputDir, `${candidateBase}${targetExt}`);
+      const stat = await fs.stat(candidate);
+      // 如果路径存在（无论是文件还是文件夹），都需要递增编号
+      if (stat.isFile() || stat.isDirectory()) {
+        n = n === 0 ? 1 : n + 1;
+        candidateBase = `${root}_转换_${n}`;
+        candidate = path.resolve(
+          normalizedOutputDir,
+          `${candidateBase}${targetExt}`
+        );
+      } else {
+        // 其他情况（如符号链接等），也递增编号
+        n = n === 0 ? 1 : n + 1;
+        candidateBase = `${root}_转换_${n}`;
+        candidate = path.resolve(
+          normalizedOutputDir,
+          `${candidateBase}${targetExt}`
+        );
+      }
     } catch {
+      // 路径不存在，当前候选名可用
       return candidate;
     }
   }
 }
 
 async function nextWatermarkOutputPath(outputDir: string, inputPath: string) {
+  // 确保输出目录是绝对路径
+  const normalizedOutputDir = path.resolve(outputDir);
   const ext = path.extname(inputPath);
   const base = path.basename(inputPath, ext);
   const m = base.match(/^(.*)_水印(?:_(\d+))?$/);
@@ -241,15 +519,24 @@ async function nextWatermarkOutputPath(outputDir: string, inputPath: string) {
   let n = m && m[2] ? parseInt(m[2], 10) + 1 : m ? 1 : 0;
 
   let candidateBase = n === 0 ? `${root}_水印` : `${root}_水印_${n}`;
-  let candidate = path.join(outputDir, `${candidateBase}${ext}`);
+  let candidate = path.resolve(normalizedOutputDir, `${candidateBase}${ext}`);
 
   while (true) {
     try {
-      await fs.access(candidate);
-      n = n === 0 ? 1 : n + 1;
-      candidateBase = `${root}_水印_${n}`;
-      candidate = path.join(outputDir, `${candidateBase}${ext}`);
+      const stat = await fs.stat(candidate);
+      // 如果路径存在（无论是文件还是文件夹），都需要递增编号
+      if (stat.isFile() || stat.isDirectory()) {
+        n = n === 0 ? 1 : n + 1;
+        candidateBase = `${root}_水印_${n}`;
+        candidate = path.resolve(normalizedOutputDir, `${candidateBase}${ext}`);
+      } else {
+        // 其他情况（如符号链接等），也递增编号
+        n = n === 0 ? 1 : n + 1;
+        candidateBase = `${root}_水印_${n}`;
+        candidate = path.resolve(normalizedOutputDir, `${candidateBase}${ext}`);
+      }
     } catch {
+      // 路径不存在，当前候选名可用
       return candidate;
     }
   }
@@ -277,22 +564,61 @@ export async function compressFiles(
   }
 
   // 质量校验与默认值处理
-  const q = typeof quality === "number" && quality >= 1 && quality <= 100 ? quality : 80;
+  const q =
+    typeof quality === "number" && quality >= 1 && quality <= 100
+      ? quality
+      : 80;
   const targetDir = await resolveOutputDir(outputDir);
 
   const tasks = filePaths.map(async (inputPath): Promise<CompressResult> => {
     try {
       const stat = await fs.stat(inputPath);
       if (!stat.isFile()) {
-        return { inputPath, outputPath: "", success: false, error: "not a file" };
+        return {
+          inputPath,
+          outputPath: "",
+          success: false,
+          error: "not a file",
+        };
       }
 
       const ext = path.extname(inputPath).toLowerCase();
       if (!isSupportedFormat(ext)) {
-        return { inputPath, outputPath: "", success: false, error: "unsupported format" };
+        return {
+          inputPath,
+          outputPath: "",
+          success: false,
+          error: "unsupported format",
+        };
       }
 
       const outputPath = await nextOutputPath(targetDir, inputPath);
+      console.log(`准备写入文件: ${outputPath}`);
+
+      // 确保输出文件的父目录存在
+      const outputParentDir = path.dirname(outputPath);
+      try {
+        await ensureDir(outputParentDir);
+        // 验证目录确实存在且可写
+        const parentStat = await fs.stat(outputParentDir);
+        if (!parentStat.isDirectory()) {
+          throw new Error(`输出目录不是有效的目录: ${outputParentDir}`);
+        }
+        console.log(`输出目录已验证: ${outputParentDir}`);
+      } catch (dirError) {
+        const dirErrorMsg =
+          dirError instanceof Error ? dirError.message : String(dirError);
+        const dirErrorCode =
+          dirError && typeof dirError === "object" && "code" in dirError
+            ? String(dirError.code)
+            : undefined;
+        console.error(`无法创建或验证输出目录: ${outputParentDir}`, {
+          error: dirErrorMsg,
+          code: dirErrorCode,
+        });
+        throw new Error(`无法创建输出目录: ${dirErrorMsg}`);
+      }
+
       // failOn: "none" 避免遇到损坏元数据时抛错
       const image = sharp(inputPath, { failOn: "none" });
 
@@ -304,7 +630,9 @@ export async function compressFiles(
           break;
         case ".png":
           // PNG：启用调色板并提高压缩等级，quality 表示输出质量倾向
-          await image.png({ quality: q, compressionLevel: 9, palette: true }).toFile(outputPath);
+          await image
+            .png({ quality: q, compressionLevel: 9, palette: true })
+            .toFile(outputPath);
           break;
         case ".webp":
           // WebP 有损压缩
@@ -320,18 +648,44 @@ export async function compressFiles(
           await image.avif({ quality: q }).toFile(outputPath);
           break;
         default:
-          return { inputPath, outputPath: "", success: false, error: "unsupported format" };
+          return {
+            inputPath,
+            outputPath: "",
+            success: false,
+            error: "unsupported format",
+          };
       }
 
+      console.log(`成功压缩文件: ${inputPath} -> ${outputPath}`);
       return { inputPath, outputPath, success: true };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      const errorCode =
+        e && typeof e === "object" && "code" in e ? String(e.code) : undefined;
+      const errorStack = e instanceof Error ? e.stack : undefined;
+      console.error(`压缩文件失败: ${inputPath}`, {
+        error: msg,
+        code: errorCode,
+        stack: errorStack,
+      });
       return { inputPath, outputPath: "", success: false, error: msg };
     }
   });
 
   const results = await Promise.all(tasks);
-  return { success: results.every((r) => r.success), results };
+  const allSuccess = results.every((r) => r.success);
+  if (!allSuccess) {
+    const failedCount = results.filter((r) => !r.success).length;
+    console.error(
+      `压缩操作部分失败: ${failedCount}/${results.length} 个文件失败`
+    );
+    results.forEach((r) => {
+      if (!r.success) {
+        console.error(`  - ${r.inputPath}: ${r.error}`);
+      }
+    });
+  }
+  return { success: allSuccess, results };
 }
 
 /**
@@ -356,53 +710,121 @@ export async function convertFiles(
 
   const targetDir = await resolveOutputDir(outputDir);
 
-  const jobs = tasks.map(async ({ file, targetFormat }): Promise<ConvertResult> => {
-    const inputPath = file.path;
-    try {
-      if (file.type !== FileItemTypeEnum.IMAGE) {
-        return { inputPath, outputPath: "", success: false, error: "not an image" };
+  const jobs = tasks.map(
+    async ({ file, targetFormat }): Promise<ConvertResult> => {
+      const inputPath = file.path;
+      try {
+        if (file.type !== FileItemTypeEnum.IMAGE) {
+          return {
+            inputPath,
+            outputPath: "",
+            success: false,
+            error: "not an image",
+          };
+        }
+
+        const stat = await fs.stat(inputPath);
+        if (!stat.isFile()) {
+          return {
+            inputPath,
+            outputPath: "",
+            success: false,
+            error: "not a file",
+          };
+        }
+
+        const fmt = String(targetFormat).toLowerCase();
+        if (!["jpg", "png", "bmp"].includes(fmt)) {
+          return {
+            inputPath,
+            outputPath: "",
+            success: false,
+            error: "unsupported target format",
+          };
+        }
+
+        const targetExt =
+          fmt === "jpg" ? ".jpg" : fmt === "png" ? ".png" : ".bmp";
+        const outputPath = await nextConvertedOutputPath(
+          targetDir,
+          inputPath,
+          targetExt
+        );
+        console.log(`准备转换文件: ${inputPath} -> ${outputPath}`);
+
+        // 确保输出文件的父目录存在
+        const outputParentDir = path.dirname(outputPath);
+        try {
+          await ensureDir(outputParentDir);
+          // 验证目录确实存在且可写
+          const parentStat = await fs.stat(outputParentDir);
+          if (!parentStat.isDirectory()) {
+            throw new Error(`输出目录不是有效的目录: ${outputParentDir}`);
+          }
+          console.log(`输出目录已验证: ${outputParentDir}`);
+        } catch (dirError) {
+          const dirErrorMsg =
+            dirError instanceof Error ? dirError.message : String(dirError);
+          const dirErrorCode =
+            dirError && typeof dirError === "object" && "code" in dirError
+              ? String((dirError as { code: unknown }).code)
+              : undefined;
+          console.error(`无法创建或验证输出目录: ${outputParentDir}`, {
+            error: dirErrorMsg,
+            code: dirErrorCode,
+          });
+          throw new Error(`无法创建输出目录: ${dirErrorMsg}`);
+        }
+        const image = sharp(inputPath, { failOn: "none" });
+
+        if (fmt === "jpg") {
+          await image.jpeg({ mozjpeg: true }).toFile(outputPath);
+        } else if (fmt === "png") {
+          await image.png().toFile(outputPath);
+        } else {
+          await bmp.sharpToBmp(image, outputPath);
+        }
+
+        console.log(`成功转换文件: ${inputPath} -> ${outputPath}`);
+        return { inputPath, outputPath, success: true };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        const errorCode =
+          e && typeof e === "object" && "code" in e
+            ? String(e.code)
+            : undefined;
+        const errorStack = e instanceof Error ? e.stack : undefined;
+        console.error(`转换文件失败: ${inputPath}`, {
+          error: msg,
+          code: errorCode,
+          stack: errorStack,
+        });
+        return { inputPath, outputPath: "", success: false, error: msg };
       }
-
-      const stat = await fs.stat(inputPath);
-      if (!stat.isFile()) {
-        return { inputPath, outputPath: "", success: false, error: "not a file" };
-      }
-
-      const fmt = String(targetFormat).toLowerCase();
-      if (!["jpg", "png", "bmp"].includes(fmt)) {
-        return { inputPath, outputPath: "", success: false, error: "unsupported target format" };
-      }
-
-      const targetExt = fmt === "jpg" ? ".jpg" : fmt === "png" ? ".png" : ".bmp";
-      const outputPath = await nextConvertedOutputPath(targetDir, inputPath, targetExt);
-      const image = sharp(inputPath, { failOn: "none" });
-
-      if (fmt === "jpg") {
-        await image.jpeg({ mozjpeg: true }).toFile(outputPath);
-      } else if (fmt === "png") {
-        await image.png().toFile(outputPath);
-      } else {
-        await bmp.sharpToBmp(image, outputPath);
-      }
-
-      return { inputPath, outputPath, success: true };
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      return { inputPath, outputPath: "", success: false, error: msg };
     }
-  });
+  );
 
   const results = await Promise.all(jobs);
   return { success: results.every((r) => r.success), results };
 }
 
 function escapeXml(s: string) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
 }
 
 // 删除单图加水印 API，批量 API 已覆盖单图场景
 
-type WatermarkPosition = "top-left" | "top-right" | "bottom-left" | "bottom-right" | "center";
+type WatermarkPosition =
+  | "top-left"
+  | "top-right"
+  | "bottom-left"
+  | "bottom-right"
+  | "center";
 
 function buildWatermarkSvg(
   width: number,
@@ -470,7 +892,15 @@ export async function addWatermarks(
   files: FileItem[],
   text: string,
   outputDir: string,
-  opts?: { fontSize?: number; color?: string; position?: WatermarkPosition; padding?: number; angle?: number; xRatio?: number; yRatio?: number }
+  opts?: {
+    fontSize?: number;
+    color?: string;
+    position?: WatermarkPosition;
+    padding?: number;
+    angle?: number;
+    xRatio?: number;
+    yRatio?: number;
+  }
 ): Promise<{ success: boolean; results: WatermarkResult[] }> {
   if (!files || files.length === 0) {
     return { success: true, results: [] };
@@ -479,13 +909,23 @@ export async function addWatermarks(
   if (!content) {
     return {
       success: false,
-      results: files.map((f) => ({ inputPath: f.path, outputPath: "", success: false, error: "watermark text empty" })),
+      results: files.map((f) => ({
+        inputPath: f.path,
+        outputPath: "",
+        success: false,
+        error: "watermark text empty",
+      })),
     };
   }
   if (content.length > 10) {
     return {
       success: false,
-      results: files.map((f) => ({ inputPath: f.path, outputPath: "", success: false, error: "watermark text too long" })),
+      results: files.map((f) => ({
+        inputPath: f.path,
+        outputPath: "",
+        success: false,
+        error: "watermark text too long",
+      })),
     };
   }
   const targetDir = await resolveOutputDir(outputDir);
@@ -494,11 +934,21 @@ export async function addWatermarks(
     const inputPath = file.path;
     try {
       if (file.type !== FileItemTypeEnum.IMAGE) {
-        return { inputPath, outputPath: "", success: false, error: "not an image" };
+        return {
+          inputPath,
+          outputPath: "",
+          success: false,
+          error: "not an image",
+        };
       }
       const stat = await fs.stat(inputPath);
       if (!stat.isFile()) {
-        return { inputPath, outputPath: "", success: false, error: "not a file" };
+        return {
+          inputPath,
+          outputPath: "",
+          success: false,
+          error: "not a file",
+        };
       }
       const meta = await sharp(inputPath, { failOn: "none" }).metadata();
       const width = meta.width ?? 0;
@@ -506,28 +956,103 @@ export async function addWatermarks(
       if (!width || !height) {
         throw new Error("无法读取图片尺寸");
       }
-      const paddingDefault = Math.max(10, Math.round(Math.min(width, height) * 0.03));
-      const fontDefault = Math.max(16, Math.round(Math.min(width, height) * 0.05));
-      const fontSize = opts?.fontSize && opts.fontSize > 0 ? Math.round(opts.fontSize) : fontDefault;
-      const color = opts?.color && opts.color.trim() ? opts.color.trim() : "rgba(255,255,255,0.75)";
+      const paddingDefault = Math.max(
+        10,
+        Math.round(Math.min(width, height) * 0.03)
+      );
+      const fontDefault = Math.max(
+        16,
+        Math.round(Math.min(width, height) * 0.05)
+      );
+      const fontSize =
+        opts?.fontSize && opts.fontSize > 0
+          ? Math.round(opts.fontSize)
+          : fontDefault;
+      const color =
+        opts?.color && opts.color.trim()
+          ? opts.color.trim()
+          : "rgba(255,255,255,0.75)";
       const angle = opts?.angle ?? 0;
       let svg: Buffer;
-      if (typeof opts?.xRatio === "number" && typeof opts?.yRatio === "number") {
+      if (
+        typeof opts?.xRatio === "number" &&
+        typeof opts?.yRatio === "number"
+      ) {
         const xr = Math.max(0, Math.min(1, opts.xRatio));
         const yr = Math.max(0, Math.min(1, opts.yRatio));
         const x = Math.round(width * xr);
         const y = Math.round(height * yr);
-        svg = buildWatermarkSvgAt(width, height, safeText, color, fontSize, x, y, angle);
+        svg = buildWatermarkSvgAt(
+          width,
+          height,
+          safeText,
+          color,
+          fontSize,
+          x,
+          y,
+          angle
+        );
       } else {
         const position = opts?.position ?? "bottom-right";
-        const pad = opts?.padding && opts.padding > 0 ? Math.round(opts.padding) : paddingDefault;
-        svg = buildWatermarkSvg(width, height, safeText, color, fontSize, position, pad, angle);
+        const pad =
+          opts?.padding && opts.padding > 0
+            ? Math.round(opts.padding)
+            : paddingDefault;
+        svg = buildWatermarkSvg(
+          width,
+          height,
+          safeText,
+          color,
+          fontSize,
+          position,
+          pad,
+          angle
+        );
       }
       const outputPath = await nextWatermarkOutputPath(targetDir, inputPath);
-      await sharp(inputPath, { failOn: "none" }).composite([{ input: svg }]).toFile(outputPath);
+      console.log(`准备添加水印: ${inputPath} -> ${outputPath}`);
+
+      // 确保输出文件的父目录存在
+      const outputParentDir = path.dirname(outputPath);
+      try {
+        await ensureDir(outputParentDir);
+        // 验证目录确实存在且可写
+        const parentStat = await fs.stat(outputParentDir);
+        if (!parentStat.isDirectory()) {
+          throw new Error(`输出目录不是有效的目录: ${outputParentDir}`);
+        }
+        console.log(`输出目录已验证: ${outputParentDir}`);
+      } catch (dirError) {
+        const dirErrorMsg =
+          dirError instanceof Error ? dirError.message : String(dirError);
+        const dirErrorCode =
+          dirError && typeof dirError === "object" && "code" in dirError
+            ? String((dirError as { code: unknown }).code)
+            : undefined;
+        console.error(`无法创建或验证输出目录: ${outputParentDir}`, {
+          error: dirErrorMsg,
+          code: dirErrorCode,
+        });
+        throw new Error(`无法创建输出目录: ${dirErrorMsg}`);
+      }
+
+      await sharp(inputPath, { failOn: "none" })
+        .composite([{ input: svg }])
+        .toFile(outputPath);
+      console.log(`成功添加水印: ${inputPath} -> ${outputPath}`);
       return { inputPath, outputPath, success: true };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      const errorCode =
+        e && typeof e === "object" && "code" in e
+          ? String((e as { code: unknown }).code)
+          : undefined;
+      const errorStack = e instanceof Error ? e.stack : undefined;
+      console.error(`添加水印失败: ${inputPath}`, {
+        error: msg,
+        code: errorCode,
+        stack: errorStack,
+      });
       return { inputPath, outputPath: "", success: false, error: msg };
     }
   });
