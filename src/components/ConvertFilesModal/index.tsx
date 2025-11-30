@@ -1,6 +1,6 @@
 import type { FileItem } from "@/types";
 import { App, Checkbox, Form, Modal, Radio, Tag, type ModalProps } from "antd";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import SelectDir from "../SelectDir";
 
 export interface ConvertFilesModalProps extends ModalProps {
@@ -14,6 +14,21 @@ export interface ConvertFilesModalProps extends ModalProps {
 export type FormType = {
   outputDir: string;
   isUseCurrentDir: boolean;
+};
+
+// 将纯函数移到组件外部，避免每次渲染都创建新函数
+const getExt = (name: string) => {
+  const idx = name.lastIndexOf(".");
+  const ext = idx >= 0 ? name.slice(idx + 1).toLowerCase() : "";
+  return ext === "jpeg" ? "jpg" : ext;
+};
+
+const defaultTargetFor = (name: string): "jpg" | "png" | "bmp" => {
+  const ext = getExt(name);
+  if (ext === "jpg") return "png";
+  if (ext === "png") return "jpg";
+  if (ext === "bmp") return "jpg";
+  return "jpg";
 };
 
 const ConvertFilesModal: React.FC<ConvertFilesModalProps> = ({
@@ -31,18 +46,12 @@ const ConvertFilesModal: React.FC<ConvertFilesModalProps> = ({
   const [targets, setTargets] = useState<Record<string, "jpg" | "png" | "bmp">>(
     {}
   );
-  const getExt = (name: string) => {
-    const idx = name.lastIndexOf(".");
-    const ext = idx >= 0 ? name.slice(idx + 1).toLowerCase() : "";
-    return ext === "jpeg" ? "jpg" : ext;
-  };
-  const defaultTargetFor = (name: string): "jpg" | "png" | "bmp" => {
-    const ext = getExt(name);
-    if (ext === "jpg") return "png";
-    if (ext === "png") return "jpg";
-    if (ext === "bmp") return "jpg";
-    return "jpg";
-  };
+
+  // 使用 useMemo 来稳定 selectedFiles 的引用，基于文件路径数组
+  const selectedFilesPaths = useMemo(
+    () => selectedFiles.map((f) => f.path).join(","),
+    [selectedFiles]
+  );
 
   const onFinish = async (values: FormType) => {
     if (values.isUseCurrentDir) {
@@ -81,7 +90,7 @@ const ConvertFilesModal: React.FC<ConvertFilesModalProps> = ({
         return next;
       });
     }
-  }, [open, form, currentDirectory, selectedFiles, getExt, defaultTargetFor]);
+  }, [open, form, currentDirectory, selectedFilesPaths]);
 
   return (
     <Modal

@@ -1,5 +1,15 @@
 import type { FileItem } from "@/types";
-import { App, Checkbox, ColorPicker, Form, Input, InputNumber, Modal, Tag, type ModalProps } from "antd";
+import {
+  App,
+  Checkbox,
+  ColorPicker,
+  Form,
+  Input,
+  InputNumber,
+  Modal,
+  Tag,
+  type ModalProps,
+} from "antd";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import SelectDir from "../SelectDir";
 
@@ -40,9 +50,20 @@ const WatermarkModal: React.FC<WatermarkModalProps> = ({
   const wmAngle = Form.useWatch("angle", form) ?? 0;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
-  const [displaySize, setDisplaySize] = useState<{ w: number; h: number; ox: number; oy: number; nw: number; nh: number; scale: number }>({ w: 0, h: 0, ox: 0, oy: 0, nw: 0, nh: 0, scale: 1 });
+  const [displaySize, setDisplaySize] = useState<{
+    w: number;
+    h: number;
+    ox: number;
+    oy: number;
+    nw: number;
+    nh: number;
+    scale: number;
+  }>({ w: 0, h: 0, ox: 0, oy: 0, nw: 0, nh: 0, scale: 1 });
   const [dragging, setDragging] = useState(false);
-  const [dragPos, setDragPos] = useState<{ x: number; y: number }>({ x: 0.9, y: 0.9 });
+  const [dragPos, setDragPos] = useState<{ x: number; y: number }>({
+    x: 0.9,
+    y: 0.9,
+  });
   const previewSrc = useMemo(() => {
     const img = selectedFiles.find((f) => !!f.imageBase64)?.imageBase64;
     return img ?? selectedFiles[0]?.imageBase64;
@@ -78,12 +99,16 @@ const WatermarkModal: React.FC<WatermarkModalProps> = ({
           message.error(`有 ${failed} 个文件加水印失败`);
         }
       }
-    setConfirmLoading(false);
+      setConfirmLoading(false);
       if (res.success) {
         message.success("加水印成功");
-        const outDir = values.isUseCurrentDir ? currentDirectory : values.outputDir;
+        const outDir = values.isUseCurrentDir
+          ? currentDirectory
+          : values.outputDir;
         if (outDir) {
-          window.dispatchEvent(new CustomEvent<string>("refresh-directory", { detail: outDir }));
+          window.dispatchEvent(
+            new CustomEvent<string>("refresh-directory", { detail: outDir })
+          );
         }
         onOk?.();
         onCancel?.();
@@ -125,7 +150,9 @@ const WatermarkModal: React.FC<WatermarkModalProps> = ({
 
   const onMouseMove = (e: React.MouseEvent) => {
     if (!dragging) return;
-    const rect = (containerRef.current as HTMLDivElement).getBoundingClientRect();
+    const rect = (
+      containerRef.current as HTMLDivElement
+    ).getBoundingClientRect();
     const x = e.clientX - rect.left - displaySize.ox;
     const y = e.clientY - rect.top - displaySize.oy;
     const cx = Math.max(0, Math.min(displaySize.w, x));
@@ -166,7 +193,11 @@ const WatermarkModal: React.FC<WatermarkModalProps> = ({
             }}
           >
             {selectedFiles[0] && (
-              <Tag bordered={false} color="processing" key={selectedFiles[0].path}>
+              <Tag
+                bordered={false}
+                color="processing"
+                key={selectedFiles[0].path}
+              >
                 {selectedFiles[0].name}
               </Tag>
             )}
@@ -179,21 +210,33 @@ const WatermarkModal: React.FC<WatermarkModalProps> = ({
         >
           <Input maxLength={10} placeholder="最多10个字" />
         </Form.Item>
-        
+
         <Form.Item<FormType> label="文字大小" name="fontSize">
-          <InputNumber min={8} max={200} placeholder="自动" style={{ width: "100%" }} />
+          <InputNumber
+            min={8}
+            max={200}
+            placeholder="自动"
+            style={{ width: "100%" }}
+          />
         </Form.Item>
         <Form.Item<FormType> label="颜色" name="color">
           <ColorPicker
             value={wmColor}
             onChangeComplete={(c: unknown) => {
-              const s = (c as { toRgbString?: () => string }).toRgbString?.() ?? "rgba(255,255,255,0.75)";
+              const s =
+                (c as { toRgbString?: () => string }).toRgbString?.() ??
+                "rgba(255,255,255,0.75)";
               form.setFieldValue("color", s);
             }}
           />
         </Form.Item>
         <Form.Item<FormType> label="倾斜角度" name="angle">
-          <InputNumber min={-180} max={180} placeholder="0" style={{ width: "100%" }} />
+          <InputNumber
+            min={-180}
+            max={180}
+            placeholder="0"
+            style={{ width: "100%" }}
+          />
         </Form.Item>
         <Form.Item<FormType> label="预览">
           <div
@@ -231,6 +274,7 @@ const WatermarkModal: React.FC<WatermarkModalProps> = ({
                   transformOrigin: "left top",
                   transform: `rotate(${wmAngle}deg) translate(-50%,-50%)`,
                   cursor: "grab",
+                  userSelect: "none",
                 }}
                 onMouseDown={() => setDragging(true)}
               >

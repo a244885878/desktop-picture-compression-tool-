@@ -19,6 +19,7 @@ import RenameModal from "@/components/RenameModal";
 import CompressedFilesModal from "../CompressedFilesModal";
 import ConvertFilesModal from "../ConvertFilesModal";
 import WatermarkModal from "../WatermarkModal";
+import CropModal from "../CropModal";
 import DetailsModal from "../DetailsModal";
 
 const Directory: React.FC = () => {
@@ -35,6 +36,7 @@ const Directory: React.FC = () => {
     useImmer(false); // 压缩文件弹窗是否打开
   const [convertFilesModalOpen, setConvertFilesModalOpen] = useImmer(false); // 转换文件弹窗是否打开
   const [watermarkModalOpen, setWatermarkModalOpen] = useImmer(false); // 加水印弹窗是否打开
+  const [cropModalOpen, setCropModalOpen] = useImmer(false); // 裁剪弹窗是否打开
   const [detailsModalOpen, setDetailsModalOpen] = useImmer(false); // 详情弹窗是否打开
 
   const { message } = App.useApp();
@@ -86,6 +88,10 @@ const Directory: React.FC = () => {
       {
         key: DropdownMenuEnum.CROP,
         label: <span>裁剪</span>,
+        onClick: () => {
+          setSelectedFiles([item]);
+          setCropModalOpen(true);
+        },
       },
       {
         key: DropdownMenuEnum.WATERMARK,
@@ -354,6 +360,13 @@ const Directory: React.FC = () => {
         currentDirectory={currentPath!}
         onOk={refreshList}
         onCancel={() => setWatermarkModalOpen(false)}
+        selectedFiles={selectedFiles}
+      />
+      <CropModal
+        open={cropModalOpen}
+        currentDirectory={currentPath!}
+        onOk={refreshList}
+        onCancel={() => setCropModalOpen(false)}
         selectedFiles={selectedFiles}
       />
       {/* 详情弹窗 */}

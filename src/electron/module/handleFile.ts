@@ -296,6 +296,13 @@ type WatermarkResult = {
   error?: string;
 };
 
+type CropResult = {
+  inputPath: string;
+  outputPath: string;
+  success: boolean;
+  error?: string;
+};
+
 /**
  * 判断是否为支持的图片格式
  * 支持：jpg/jpeg、png、webp、tif/tiff、avif
@@ -533,6 +540,46 @@ async function nextWatermarkOutputPath(outputDir: string, inputPath: string) {
         // 其他情况（如符号链接等），也递增编号
         n = n === 0 ? 1 : n + 1;
         candidateBase = `${root}_水印_${n}`;
+        candidate = path.resolve(normalizedOutputDir, `${candidateBase}${ext}`);
+      }
+    } catch {
+      // 路径不存在，当前候选名可用
+      return candidate;
+    }
+  }
+}
+
+/**
+ * 根据命名规则生成"裁剪"后的输出文件路径并避免重名
+ * 规则：
+ * - 原文件名不包含"_裁剪"：name.ext → name_裁剪.ext
+ * - 原文件名已包含"_裁剪"：name_裁剪.ext → name_裁剪_1.ext；name_裁剪_3.ext → name_裁剪_4.ext
+ * - 若目标已存在（文件或文件夹），则继续递增编号，直到找到可用文件名
+ */
+async function nextCropOutputPath(outputDir: string, inputPath: string) {
+  // 确保输出目录是绝对路径
+  const normalizedOutputDir = path.resolve(outputDir);
+  const ext = path.extname(inputPath);
+  const base = path.basename(inputPath, ext);
+  const m = base.match(/^(.*)_裁剪(?:_(\d+))?$/);
+  const root = m ? m[1] : base;
+  let n = m && m[2] ? parseInt(m[2], 10) + 1 : m ? 1 : 0;
+
+  let candidateBase = n === 0 ? `${root}_裁剪` : `${root}_裁剪_${n}`;
+  let candidate = path.resolve(normalizedOutputDir, `${candidateBase}${ext}`);
+
+  while (true) {
+    try {
+      const stat = await fs.stat(candidate);
+      // 如果路径存在（无论是文件还是文件夹），都需要递增编号
+      if (stat.isFile() || stat.isDirectory()) {
+        n = n === 0 ? 1 : n + 1;
+        candidateBase = `${root}_裁剪_${n}`;
+        candidate = path.resolve(normalizedOutputDir, `${candidateBase}${ext}`);
+      } else {
+        // 其他情况（如符号链接等），也递增编号
+        n = n === 0 ? 1 : n + 1;
+        candidateBase = `${root}_裁剪_${n}`;
         candidate = path.resolve(normalizedOutputDir, `${candidateBase}${ext}`);
       }
     } catch {
@@ -1058,4 +1105,174 @@ export async function addWatermarks(
   });
   const results = await Promise.all(jobs);
   return { success: results.every((r) => r.success), results };
+}
+
+/**
+ * 裁剪图片（单张）
+ * @param file 文件对象（仅图片类型有效）
+ * @param outputDir 输出目录（不存在将自动创建）
+ * @param cropArea 裁剪区域 { left: number, top: number, width: number, height: number }
+ * @returns { success, result }：成功标记与结果
+ *
+ * 行为说明：
+ * - 非图片或非文件会返回失败
+ * - 始终生成新文件，命名遵循"原文件名_裁剪"/"原文件名_裁剪_序号"，避免重名
+ * - 裁剪区域坐标和尺寸必须是整数，且不能超出图片范围
+ */
+export async function cropImage(
+  file: FileItem,
+  outputDir: string,
+  cropArea: { left: number; top: number; width: number; height: number }
+): Promise<{ success: boolean; result: CropResult }> {
+  const inputPath = file.path;
+
+  try {
+    if (file.type !== FileItemTypeEnum.IMAGE) {
+      return {
+        success: false,
+        result: {
+          inputPath,
+          outputPath: "",
+          success: false,
+          error: "not an image",
+        },
+      };
+    }
+
+    const stat = await fs.stat(inputPath);
+    if (!stat.isFile()) {
+      return {
+        success: false,
+        result: {
+          inputPath,
+          outputPath: "",
+          success: false,
+          error: "not a file",
+        },
+      };
+    }
+
+    // 验证裁剪区域参数
+    const left = Math.round(cropArea.left);
+    const top = Math.round(cropArea.top);
+    const width = Math.round(cropArea.width);
+    const height = Math.round(cropArea.height);
+
+    if (width <= 0 || height <= 0) {
+      return {
+        success: false,
+        result: {
+          inputPath,
+          outputPath: "",
+          success: false,
+          error: "裁剪区域宽度和高度必须大于0",
+        },
+      };
+    }
+
+    if (left < 0 || top < 0) {
+      return {
+        success: false,
+        result: {
+          inputPath,
+          outputPath: "",
+          success: false,
+          error: "裁剪区域坐标不能为负数",
+        },
+      };
+    }
+
+    // 获取图片尺寸
+    const meta = await sharp(inputPath, { failOn: "none" }).metadata();
+    const imageWidth = meta.width ?? 0;
+    const imageHeight = meta.height ?? 0;
+
+    if (!imageWidth || !imageHeight) {
+      return {
+        success: false,
+        result: {
+          inputPath,
+          outputPath: "",
+          success: false,
+          error: "无法读取图片尺寸",
+        },
+      };
+    }
+
+    // 验证裁剪区域是否超出图片范围
+    if (left + width > imageWidth || top + height > imageHeight) {
+      return {
+        success: false,
+        result: {
+          inputPath,
+          outputPath: "",
+          success: false,
+          error: `裁剪区域超出图片范围。图片尺寸: ${imageWidth}x${imageHeight}, 裁剪区域: left=${left}, top=${top}, width=${width}, height=${height}`,
+        },
+      };
+    }
+
+    const targetDir = await resolveOutputDir(outputDir);
+    const outputPath = await nextCropOutputPath(targetDir, inputPath);
+    console.log(`准备裁剪图片: ${inputPath} -> ${outputPath}`);
+
+    // 确保输出文件的父目录存在
+    const outputParentDir = path.dirname(outputPath);
+    try {
+      await ensureDir(outputParentDir);
+      // 验证目录确实存在且可写
+      const parentStat = await fs.stat(outputParentDir);
+      if (!parentStat.isDirectory()) {
+        throw new Error(`输出目录不是有效的目录: ${outputParentDir}`);
+      }
+      console.log(`输出目录已验证: ${outputParentDir}`);
+    } catch (dirError) {
+      const dirErrorMsg =
+        dirError instanceof Error ? dirError.message : String(dirError);
+      const dirErrorCode =
+        dirError && typeof dirError === "object" && "code" in dirError
+          ? String((dirError as { code: unknown }).code)
+          : undefined;
+      console.error(`无法创建或验证输出目录: ${outputParentDir}`, {
+        error: dirErrorMsg,
+        code: dirErrorCode,
+      });
+      return {
+        success: false,
+        result: {
+          inputPath,
+          outputPath: "",
+          success: false,
+          error: `无法创建输出目录: ${dirErrorMsg}`,
+        },
+      };
+    }
+
+    // 执行裁剪
+    await sharp(inputPath, { failOn: "none" })
+      .extract({ left, top, width, height })
+      .toFile(outputPath);
+
+    console.log(`成功裁剪图片: ${inputPath} -> ${outputPath}`);
+    return {
+      success: true,
+      result: { inputPath, outputPath, success: true },
+    };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const errorCode =
+      e && typeof e === "object" && "code" in e
+        ? String((e as { code: unknown }).code)
+        : undefined;
+    const errorStack = e instanceof Error ? e.stack : undefined;
+    console.error(`裁剪图片失败: ${inputPath}`, {
+      error: msg,
+      code: errorCode,
+      stack: errorStack,
+    });
+    return {
+      success: false,
+      result: { inputPath, outputPath: "", success: false, error: msg },
+    };
+  }
 }

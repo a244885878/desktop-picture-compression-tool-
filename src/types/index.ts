@@ -142,6 +142,19 @@ declare global {
           error?: string;
         }[];
       }>; // 加水印
+      cropImage: (
+        file: FileItem,
+        outputDir: string,
+        cropArea: { left: number; top: number; width: number; height: number }
+      ) => Promise<{
+        success: boolean;
+        result: {
+          inputPath: string;
+          outputPath: string;
+          success: boolean;
+          error?: string;
+        };
+      }>; // 裁剪图片
       getFileInfo: (filePath: string) => Promise<FileInfo>;
     };
   }
